@@ -1,0 +1,3103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Weather Soup - Lyrical Data</title>
+<meta name="author" content="Lyrical Data">
+<meta name="description" content="Experimental weather visualization by Lyrical Data">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&family=Fredoka:wght@400;600&family=VT323&display=swap" rel="stylesheet">
+<!-- Natural Earth 110m land polygons (public domain). Fetched async; globe
+     waits for the 'worldpolysready' event before starting its animation. -->
+<script src="world-polys.js"></script>
+<style>
+/* ============================================================
+   CSS VARIABLES — two skins
+   ============================================================ */
+:root {
+  --skin: terminal;
+}
+
+/* --- TERMINAL SKIN --- */
+body.skin-terminal {
+  --bg:          #0a0f0a;
+  --bg2:         #0d140d;
+  --bg3:         #111a11;
+  --panel:       #0f1a0f;
+  --panel-alt:   #0c160c;
+  --border:      #1e3a1e;
+  --border-hl:   #2a5a2a;
+  --fg:          #b8ffb8;
+  --fg2:         #7dcc7d;
+  --fg3:         #4a994a;
+  --fg-dim:      #2d662d;
+  --accent:      #00ff41;
+  --accent2:     #39ff14;
+  --warn:        #ffcc00;
+  --hot:         #ff4444;
+  --cold:        #44aaff;
+  --precip:      #4488ff;
+  --uv-low:      #33aa33;
+  --uv-mid:      #ffaa00;
+  --uv-high:     #ff4400;
+  --night-bg:    #050b05;
+  --day-bg:      #0f1f0f;
+  --font-mono:   'Share Tech Mono', 'Courier New', monospace;
+  --font-display:'VT323', monospace;
+  --font-body:   'Share Tech Mono', monospace;
+  --scanline:    rgba(0,255,65,0.03);
+  --glow:        0 0 8px rgba(0,255,65,0.4);
+  --glow-strong: 0 0 16px rgba(0,255,65,0.7), 0 0 32px rgba(0,255,65,0.3);
+  --radius:      2px;
+  --toggle-icon: "⬡";
+}
+
+/* --- KITSCHY SKIN --- */
+body.skin-kitschy {
+  --bg:          #fff8f0;
+  --bg2:         #fff0e0;
+  --bg3:         #ffe8d0;
+  --panel:       #ffffff;
+  --panel-alt:   #fef6ee;
+  --border:      #f0c080;
+  --border-hl:   #e08030;
+  --fg:          #3a2010;
+  --fg2:         #6b4020;
+  --fg3:         #9b6030;
+  --fg-dim:      #c89060;
+  --accent:      #ff6b35;
+  --accent2:     #ff3d7f;
+  --warn:        #ffd700;
+  --hot:         #ff4444;
+  --cold:        #4499ff;
+  --precip:      #4488ff;
+  --uv-low:      #22bb44;
+  --uv-mid:      #ffaa00;
+  --uv-high:     #ff3300;
+  --night-bg:    #1a1035;
+  --day-bg:      #fff3e0;
+  --font-mono:   'Fredoka', sans-serif;
+  --font-display:'Bebas Neue', sans-serif;
+  --font-body:   'Fredoka', sans-serif;
+  --scanline:    transparent;
+  --glow:        0 2px 8px rgba(255,107,53,0.3);
+  --glow-strong: 0 4px 16px rgba(255,107,53,0.5);
+  --radius:      12px;
+  --toggle-icon: "✦";
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 14px; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background 0.4s, color 0.4s;
+}
+
+/* scanline overlay for terminal */
+body.skin-terminal::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    var(--scanline) 0px,
+    var(--scanline) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* ============================================================
+   LAYOUT WRAPPER
+   ============================================================ */
+#app {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ============================================================
+   PANEL BASE
+   ============================================================ */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+
+/* KNOB (1): base panel header size (terminal skin) — raise/lower font-size here */
+.panel-header {
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  letter-spacing: 0.12em;
+  color: var(--fg3);
+  text-transform: uppercase;
+}
+
+/* KNOB (1): kitschy panel header size — raise/lower font-size here */
+body.skin-kitschy .panel-header {
+  font-size: 1.4rem;
+  letter-spacing: 0.05em;
+}
+
+/* ============================================================
+   SKIN TOGGLE
+   ============================================================ */
+#skin-toggle {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 999;
+  background: var(--bg3);
+  border: 1px solid var(--border-hl);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  letter-spacing: 0.1em;
+  box-shadow: var(--glow);
+  transition: all 0.3s;
+}
+#skin-toggle:hover { box-shadow: var(--glow-strong); }
+
+/* ============================================================
+   TOP BAR — date left, time right
+   ============================================================ */
+#topbar {
+  padding: 10px 12px;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* LEFT: day-of-week large, then date below */
+#topbar-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start; /* Aligns to top */
+}
+
+#date-dow {
+  font-family: var(--font-display);
+  font-size: 3.2rem;
+  line-height: 1;
+  color: var(--fg);
+  letter-spacing: 0.02em;
+}
+
+body.skin-kitschy #date-dow { font-size: 3.5rem; }
+
+#date-mdy {
+  font-family: var(--font-display);
+  font-size: 3.2rem;
+  color: var(--fg2);
+  line-height: 1;
+  margin-top: -2px;
+  letter-spacing: 0.02em;
+}
+
+body.skin-kitschy #date-mdy { font-size: 3.5rem; }
+
+/* RIGHT: time large, seconds smaller below, then meta tiny */
+#topbar-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start; /* Aligns to top */
+}
+
+#time-hhmm {
+  font-family: var(--font-display);
+  font-size: 3.2rem;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: var(--glow);
+  letter-spacing: 0.02em;
+}
+
+body.skin-kitschy #time-hhmm { font-size: 3.5rem; }
+
+/* seconds: same size as main time, dimmer */
+#time-ss {
+  font-family: var(--font-display);
+  font-size: 3.2rem;
+  line-height: 1;
+  color: var(--fg3);
+  letter-spacing: 0.02em;
+  margin-top: -2px;
+  text-align: right;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.2em;
+}
+
+#time-tz {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  align-self: flex-end;
+  padding-bottom: 0.15em;
+}
+
+body.skin-kitschy #time-ss { font-size: 3.5rem; }
+body.skin-kitschy #time-tz { font-size: 1.2rem; }
+
+#meta-right {
+  text-align: right;
+  font-size: 0.65rem;
+  color: var(--fg-dim);
+  line-height: 1.7;
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================
+   NOW PANEL
+   ============================================================ */
+#now-panel {
+  padding: 12px;
+}
+
+#now-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* Wraps the temperature and the new dynamic wind canvas */
+.now-temp-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-right: 10px;
+  min-height: 130px;
+}
+
+.now-temp-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex: 1;
+}
+
+/* Bottom footer row: condition + wind speed, aligned with arc label strip */
+.now-temp-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  gap: 6px;
+}
+
+.wind-speed-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--fg3);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+body.skin-kitschy .wind-speed-label {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+}
+
+.now-temp-block {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.wind-anim-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+}
+
+#wind-anim-canvas {
+  display: block;
+  width: 60px;
+  height: 60px;
+}
+
+#now-icon-wrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+#now-icon-wrap canvas {
+  flex: 1;
+  min-height: 110px;
+}
+
+.temp-f {
+  font-family: var(--font-display);
+  font-size: 4.5rem;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: var(--glow-strong);
+  letter-spacing: -0.02em;
+}
+
+body.skin-kitschy .temp-f { font-size: 5rem; }
+
+.temp-c {
+  font-size: 0.85rem;
+  color: var(--fg3);
+}
+
+.now-condition {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--fg3);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+
+body.skin-kitschy .now-condition {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+}
+
+.now-details {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.now-stat {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 0.6rem;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: block;
+}
+
+.stat-value {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  color: var(--fg2);
+  display: block;
+  line-height: 1.1;
+}
+
+body.skin-kitschy .stat-value { font-size: 1.5rem; }
+
+/* Wind arrow */
+.wind-arrow-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.wind-arrow {
+  display: inline-block;
+  font-size: 1.2rem;
+  transition: transform 0.5s ease;
+}
+.wind-speed-val {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  color: var(--fg2);
+  line-height: 1;
+}
+
+/* Sunrise/sunset row */
+.sun-row {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-around;
+  font-size: 0.7rem;
+  color: var(--fg3);
+  padding: 4px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+
+/* ============================================================
+   HOURLY PANEL
+   ============================================================ */
+#hourly-panel .panel-header span { font-size: 0.7rem; color: var(--fg-dim); }
+
+.hourly-table-wrap {
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+.hourly-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.hourly-table th {
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  padding: 2px 2px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+  text-align: center;
+}
+
+body.skin-kitschy .hourly-table th { font-size: 0.7rem; }
+
+.hourly-table td {
+  padding: 1px 2px;
+  text-align: center;
+  font-size: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  white-space: nowrap;
+  line-height: 1.15;
+}
+
+body.skin-kitschy .hourly-table td { font-size: 0.8rem; }
+
+/* Time column */
+td.h-time {
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  color: var(--accent);
+  padding-left: 5px;
+  width: 40px;
+  min-width: 40px;
+}
+body.skin-kitschy td.h-time { font-size: 0.9rem; }
+.ampm-tag {
+  font-size: 0.5rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.04em;
+  display: block;
+  line-height: 1;
+}
+
+/* Night rows */
+tr.h-night { background: var(--night-bg); }
+tr.h-night td.h-time { color: var(--warn); }
+tr.h-day   { background: var(--day-bg); }
+
+/* Temperature cell — position-as-sparkline */
+td.h-temp {
+  width: 80px;
+  min-width: 80px;
+  padding: 1px 0;
+  position: relative;
+}
+.temp-plot-wrap {
+  position: relative;
+  width: 80px;
+  height: 16px;
+  display: block;
+}
+.temp-plot-label {
+  position: absolute;
+  top: 0;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  line-height: 16px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* Wind cell */
+td.h-wind {
+  font-family: var(--font-display);
+  min-width: 34px;
+}
+
+/* UV */
+td.h-uv {
+  font-family: var(--font-display);
+  min-width: 20px;
+}
+td.h-uv.uv-high {
+  background: var(--hot);
+  color: #fff !important;
+  border-radius: 3px;
+  font-weight: bold;
+}
+
+/* Precip */
+td.h-precip { color: var(--precip); font-family: var(--font-display); font-size: 0.8rem; }
+td.h-precip.no-precip { color: var(--fg-dim); font-size: 0.6rem; }
+
+/* Clouds bar */
+td.h-clouds { width: 32px; min-width: 32px; padding: 1px 2px; }
+td.h-cloud-bar { width: 36px; min-width: 36px; padding: 1px 3px; }
+.cloud-bar-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cloud-bar-bg {
+  width: 30px;
+  height: 7px;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+/* Day: clear=sky-blue bg, cloud fill grows from right as gray */
+.cloud-bar-bg.cb-day {
+  background: #1a6aaa;
+  border: 1px solid #0d4477;
+}
+.cloud-bar-bg.cb-day .cloud-bar-fill {
+  background: #7a8fa0;
+}
+/* Night: clear=near-black, cloud fill=dark gray */
+.cloud-bar-bg.cb-night {
+  background: #080e14;
+  border: 1px solid #1a2a3a;
+}
+.cloud-bar-bg.cb-night .cloud-bar-fill {
+  background: #3a4a5a;
+}
+.cloud-bar-fill {
+  height: 100%;
+}
+
+/* RH (humidity) cell */
+td.h-rh { font-size: 0.85rem; }
+
+/* Current-hour highlight */
+tr.h-current { border-left: 2px solid var(--accent); }
+tr.h-current td { background: color-mix(in srgb, var(--panel) 85%, var(--accent) 15%); }
+
+/* ============================================================
+   RANGE BUTTON GROUP (replaces dropdowns in panel headers)
+   ============================================================ */
+.range-btn-group {
+  display: flex;
+  gap: 3px;
+}
+.range-btn {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  white-space: nowrap;
+}
+.range-btn.active,
+.range-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--bg3);
+}
+
+
+.panel-header select {
+  background: var(--bg2);
+  border: 1px solid var(--border-hl);
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  padding: 1px 4px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  outline: none;
+}
+body.skin-kitschy .panel-header select {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+}
+
+
+/* --- LOCATION LAYOUT UPDATE --- */
+#location-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+#globe-canvas {
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+/* ============================================================
+   LOCATION SELECTOR
+   ============================================================ */
+#location-bar {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+#location-header-row {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+}
+#location-bar-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 5px 10px 6px;
+}
+#location-label {
+  color: var(--fg3);
+  letter-spacing: 0.12em;
+  font-size: 1.2rem;
+  font-family: var(--font-display);
+  white-space: nowrap;
+  line-height: 1;
+}
+body.skin-kitschy #location-label { font-size: 1.4rem; letter-spacing: 0.05em; }
+#location-select {
+  background: var(--bg3);
+  border: 1px solid var(--border-hl);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  outline: none;
+  width: 100%;
+}
+body.skin-kitschy #location-select { font-family: var(--font-body); font-size: 1rem; }
+#location-coords {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.06em;
+  padding-left: 2px;
+}
+
+/* NOW label on daily chart */
+#daily-svg-wrap {
+  position: relative;
+}
+#daily-now-label {
+  position: absolute;
+  left: 2px;
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  transform: translateY(-50%);
+  background: var(--panel);
+  padding: 0 2px;
+  z-index: 2;
+}
+
+/* ============================================================
+   DAILY PANEL
+   ============================================================ */
+#daily-panel-content {
+  padding: 8px 10px;
+}
+
+.daily-axis {
+  position: relative;
+  height: 120px;
+  margin: 8px 0 4px;
+}
+
+.daily-strip {
+  display: flex;
+  height: 100%;
+  gap: 0;
+}
+
+.daily-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  cursor: default;
+}
+
+.daily-col.today { background: color-mix(in srgb, var(--bg) 70%, var(--accent) 30%); }
+
+.d-name {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  color: var(--fg3);
+  letter-spacing: 0.05em;
+  padding-top: 2px;
+}
+
+body.skin-kitschy .d-name { font-size: 1rem; }
+
+.d-name.weekend { color: var(--accent); font-weight: bold; }
+
+.d-icon { font-size: 1.3rem; margin: 2px 0; }
+
+.d-bar-area {
+  flex: 1;
+  width: 100%;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 2px;
+}
+
+/* SVG-based connected temp range chart */
+#daily-svg {
+  width: 100%;
+  overflow: visible;
+  display: block;
+}
+
+.d-precip {
+  font-size: 0.65rem;
+  color: var(--precip);
+  text-align: center;
+  padding-bottom: 3px;
+}
+.d-precip.no-rain { color: var(--fg-dim); }
+
+/* Daily meta row */
+.daily-meta {
+  display: flex;
+  font-size: 0.65rem;
+  color: var(--fg3);
+  padding: 4px 0 0;
+  border-top: 1px solid var(--border);
+  justify-content: space-between;
+}
+
+/* ============================================================
+   LOADING / ERROR
+   ============================================================ */
+#loading {
+  text-align: center;
+  padding: 40px 20px;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--fg3);
+  letter-spacing: 0.15em;
+}
+
+.blink { animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+#error-msg {
+  display: none;
+  padding: 12px;
+  background: var(--bg3);
+  border: 1px solid var(--hot);
+  border-radius: var(--radius);
+  color: var(--hot);
+  font-size: 0.8rem;
+}
+
+/* ============================================================
+   PAGE BANNER — WEATHER SOUP
+   ============================================================ */
+#page-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+#banner-title {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  text-shadow: var(--glow);
+  line-height: 1;
+}
+
+body.skin-kitschy #banner-title {
+  font-size: 1.6rem;
+  letter-spacing: 0.08em;
+  text-shadow: none;
+}
+
+#banner-version {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.08em;
+}
+
+/* ============================================================
+   DATA-LAST timestamp footer
+   ============================================================ */
+#footer {
+  text-align: center;
+  font-size: 0.6rem;
+  color: var(--fg-dim);
+  padding: 6px;
+  letter-spacing: 0.08em;
+}
+
+/* ============================================================
+   KITSCHY extra flair
+   ============================================================ */
+body.skin-kitschy #topbar {
+  background: linear-gradient(135deg, #fff8f0, #ffe8c8);
+  border-color: #f0b060;
+}
+body.skin-kitschy .panel { box-shadow: 0 3px 12px rgba(200,120,40,0.15); }
+body.skin-kitschy .temp-f { color: #7a3a10 !important; text-shadow: none; }
+body.skin-kitschy .stat-value { color: var(--fg2); }
+body.skin-kitschy .now-stat { border-radius: 10px; }
+body.skin-kitschy .stat-label { color: var(--fg3); }
+body.skin-kitschy tr.h-current td {
+  background: color-mix(in srgb, #fff3e0 80%, #ff6b35 20%);
+}
+body.skin-kitschy .cloud-bar-bg.cb-day  { background: #87ceeb; border-color: #5ba8d4; }
+body.skin-kitschy .cloud-bar-bg.cb-day .cloud-bar-fill  { background: #b0c4d8; }
+body.skin-kitschy .cloud-bar-bg.cb-night { background: #1a1035; border-color: #3a2a60; }
+body.skin-kitschy .cloud-bar-bg.cb-night .cloud-bar-fill { background: #5a5070; }
+
+/* ============================================================
+   RESPONSIVE TWEAKS
+   ============================================================ */
+@media (max-width: 360px) {
+  .temp-f { font-size: 3.5rem; }
+  #time-display { font-size: 2.2rem; }
+  .hourly-table td, .hourly-table th { padding: 4px 4px; font-size: 0.75rem; }
+}
+
+/* ============================================================
+   SOUP SPEC — collapsible methodology footnote
+   ============================================================ */
+.soup-spec-bar {
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  padding: 3px 8px;
+  background: var(--bg3);
+}
+.soup-spec-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: color 0.2s, border-color 0.2s;
+}
+.soup-spec-btn:hover,
+.soup-spec-btn.open {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.soup-spec-body {
+  display: none;
+  padding: 8px 12px 10px;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--fg3);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  letter-spacing: 0.02em;
+}
+.soup-spec-body.open { display: block; }
+.soup-spec-section {
+  color: var(--fg2);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+.soup-spec-key { color: var(--accent); }
+</style>
+</head>
+<body class="skin-terminal">
+
+<button id="skin-toggle" title="Toggle skin">◈ SKIN</button>
+
+<div id="app">
+  <div id="loading">LOADING<span class="blink">_</span></div>
+  <div id="error-msg" style="display:none;padding:12px;color:var(--hot);font-family:var(--font-mono);font-size:0.85rem;"></div>
+
+  <!-- PAGE BANNER -->
+  <div id="page-banner">
+    <span id="banner-title">WEATHER SOUP</span>
+    <span id="banner-version">v. 260401</span>
+  </div>
+
+  <!-- TOP BAR -->
+  <div id="topbar">
+    <div id="topbar-left">
+      <div id="date-mdy">March 29</div>
+      <div id="date-dow">Sunday</div>
+    </div>
+    <div id="topbar-right">
+      <div id="time-hhmm">12:00 AM</div>
+      <div id="time-ss"><span id="time-ss-num">:00</span><span id="time-tz">CST</span></div>
+      <div id="meta-right">
+        <span id="meta-combined"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOCATION BAR -->
+  <div id="location-bar">
+    <div id="location-header-row">
+      <span id="location-label">HERE</span>
+    </div>
+    <div id="location-bar-row">
+      <div id="location-left">
+        <select id="location-select">
+          <option value="41.9,-87.9,America/Chicago">Chicago, IL</option>
+          <option value="25.7617,-80.1918,America/New_York">Miami, FL</option>
+          <option value="37.7749,-122.4194,America/Los_Angeles">San Francisco, CA</option>
+          <option value="40.7128,-74.006,America/New_York">New York, NY</option>
+          <option value="51.5074,-0.1278,Europe/London">London, UK</option>
+          <option value="48.8566,2.3522,Europe/Paris">Paris, France</option>
+          <option value="35.6762,139.6503,Asia/Tokyo">Tokyo, Japan</option>
+          <option value="-33.8688,151.2093,Australia/Sydney">Sydney, Australia</option>
+          <option value="-1.2921,36.8219,Africa/Nairobi">Nairobi, Kenya</option>
+        </select>
+        <div id="location-coords">--°N  --°W</div>
+      </div>
+      <canvas id="globe-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- NOW PANEL -->
+  <div class="panel" id="now-section" style="display:none">
+    <div class="panel-header">
+      <span>NOW</span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="range-btn-group" id="now-sky-btns">
+          <button class="range-btn active" id="now-sky-btn-current" data-view="current">Daytime Sky</button>
+          <button class="range-btn" id="now-sky-btn-other" data-view="other">Upcoming Night</button>
+        </div>
+        <span id="now-header-time"></span>
+      </div>
+    </div>
+    <div id="now-panel">
+      <div id="now-grid" class="now-grid">
+        <div class="now-temp-wrap">
+          <div class="now-temp-body">
+            <div class="now-temp-block">
+              <div class="temp-f" id="now-temp-f">--°F</div>
+              <div class="temp-c" id="now-temp-c">--°C</div>
+            </div>
+            <div class="wind-anim-wrap">
+              <canvas id="wind-anim-canvas"></canvas>
+            </div>
+          </div>
+          <div class="now-temp-footer">
+            <div class="now-condition" id="now-condition">---</div>
+            <div class="wind-speed-label" id="now-wind-label">-- MPH</div>
+          </div>
+        </div>
+        <div id="now-icon-wrap" style="border-radius:var(--radius);overflow:hidden;align-self:stretch;">
+          <canvas id="sun-arc-canvas" style="width:100%;height:100%;min-height:120px;display:block;"></canvas>
+        </div>
+
+        <div class="now-details">
+          <div class="now-stat">
+            <span class="stat-label">Dew Pt</span>
+            <span class="stat-value" id="now-dew">--°</span>
+          </div>
+          <div class="now-stat">
+            <span class="stat-label">Humidity</span>
+            <span class="stat-value" id="now-humidity">--%</span>
+            <span id="now-comfort-emoji" style="font-size:1.1rem;line-height:1;display:block;"></span>
+          </div>
+          <div class="now-stat">
+            <span class="stat-label">Precip/hr</span>
+            <span class="stat-value" id="now-precip">--</span>
+          </div>
+        </div>
+
+      </div>
+
+    <!-- SOUP SPEC: NOW -->
+    <div class="soup-spec-bar">
+      <button class="soup-spec-btn" onclick="toggleSoup(this)">[ SOUP SPEC ]</button>
+    </div>
+    <div class="soup-spec-body">
+<span class="soup-spec-section">DATA SOURCE</span>
+<span class="soup-spec-key">provider</span>   open-meteo.com (free, no API key)
+<span class="soup-spec-key">endpoint</span>   /v1/forecast?current=...
+<span class="soup-spec-key">refresh</span>    every 15 min, aligned to :01/:16/:31/:46
+<span class="soup-spec-key">fields</span>     temperature_2m, relative_humidity_2m, dew_point_2m,
+           apparent_temperature, precipitation, weather_code,
+           cloud_cover, wind_speed_10m, wind_direction_10m, uv_index
+
+<span class="soup-spec-section">DATA SOUP</span>
+<span class="soup-spec-key">temperature</span>  primary: °F (C→F: ×9/5 + 32); secondary: °C raw
+           color: accent=moderate, hot=>=85°F, cold=<=32°F
+<span class="soup-spec-key">condition</span>  WMO weather-code → description text only (no emoji on left;
+           emoji lives exclusively on the sun-arc canvas)
+<span class="soup-spec-key">wind</span>       kph → mph (÷1.60934); direction 0°=N clockwise
+           canvas: arrow points in direction wind is GOING
+           anemometer spin rate capped at 50 mph equivalent
+<span class="soup-spec-key">humidity</span>   raw % RH; displayed as-is in the NOW stats box
+<span class="soup-spec-key">UV index</span>   0–2 low (green) · 3–5 mid (amber) · 6+ high (red)
+<span class="soup-spec-key">dew point</span>  °C → °F; comfort proxy shown in NOW stats; also drives
+           COMFORT emoji in hourly table (see hourly soup spec)
+<span class="soup-spec-key">precip/hr</span>  mm → inches (÷25.4); "—" if zero
+<span class="soup-spec-key">cloud</span>      raw % cover; drives sky gradient in sun-arc canvas
+           0%=deep blue, 100%=flat gray (terminal: navy→slate)
+<span class="soup-spec-key">sun arc</span>    ellipse from today's sunrise→sunset (open-meteo daily)
+           arc split: travelled=solid/bright, remaining=dim/dashed
+           hourly ticks every 1h, major tick every 6h
+    </div>
+  </div>
+
+  <!-- HOURLY PANEL -->
+  <div class="panel" id="hourly-section" style="display:none">
+    <div class="panel-header">
+      <span>HOURLY FORECAST</span>
+      <div class="range-btn-group" id="hourly-range-btns">
+        <button class="range-btn active" data-val="30">next 30h</button>
+        <button class="range-btn" data-val="168">next 7d</button>
+      </div>
+    </div>
+    <div class="hourly-table-wrap">
+      <table class="hourly-table">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding-left:5px">Time</th>
+            <th>Temp (F)</th>
+            <th>Comfort/RH</th>
+            <th>Wind (mph)</th>
+            <th>UV</th>
+            <th>☔ (in)</th>
+            <th title="Cloud cover %">☁</th>
+            <th style="text-align:right;padding-right:4px">Sky</th>
+          </tr>
+        </thead>
+        <tbody id="hourly-body"></tbody>
+      </table>
+
+    <!-- SOUP SPEC: HOURLY -->
+    <div class="soup-spec-bar">
+      <button class="soup-spec-btn" onclick="toggleSoup(this)">[ SOUP SPEC ]</button>
+    </div>
+    <div class="soup-spec-body">
+<span class="soup-spec-section">DATA SOURCE</span>
+<span class="soup-spec-key">provider</span>   open-meteo.com /v1/forecast?hourly=...
+<span class="soup-spec-key">resolution</span> 1-hour intervals; fetched up to 16 days ahead
+<span class="soup-spec-key">display</span>    next 30h (default) or next 7d; toggle buttons top-right
+<span class="soup-spec-key">fields</span>     weather_code, temperature_2m, dew_point_2m,
+           relative_humidity_2m, precipitation, wind_speed_10m,
+           wind_direction_10m, uv_index, cloud_cover, is_day
+
+<span class="soup-spec-section">DATA SOUP</span>
+<span class="soup-spec-key">time rows</span>  current hour highlighted with accent border + tint
+           day rows: --day-bg; night rows: --night-bg (darker)
+           AM/PM label shown only on first row of each period
+<span class="soup-spec-key">temp col</span>   "Temp (F)" — sparkline: value positioned on x-axis spanning
+           the min→max range of displayed hours; hot/cold coloring
+           dew point shown dimmer on shared sparkline axis
+<span class="soup-spec-key">comfort col</span> "Comfort/RH" — emoji keyed to dew point °F (subjective comfort):
+           🌵 &lt;35°F  bone dry / desert air
+           🙂 35–49°F comfortable / pleasant
+           😐 50–59°F OK, slightly humid
+           💧 60–69°F muggy / noticeable
+           🌊 70°F+   drowning / oppressive
+           raw RH% shown in small text alongside emoji
+<span class="soup-spec-key">wind col</span>   "Wind (mph)" — cardinal direction arrow; size scales with speed
+           opacity drops to 0.35 below 3 mph
+<span class="soup-spec-key">UV col</span>     highlighted red cell if UV > 5
+<span class="soup-spec-key">precip col</span> "☔ (in)" — mm → inches; "·" if zero (dim)
+<span class="soup-spec-key">sky col</span>    horizontal bar: fill % = cloud_cover
+           sky icon (WMO emoji) shown on first row + when code
+           category changes or day/night flips
+    </div>
+  </div>
+
+  <!-- DAILY PANEL -->
+  <div class="panel" id="daily-section" style="display:none">
+    <div class="panel-header">
+      <span>DAILY FORECAST</span>
+      <div class="range-btn-group" id="daily-range-btns">
+        <button class="range-btn active" data-val="7">7-day</button>
+        <button class="range-btn" data-val="14">14-day</button>
+      </div>
+    </div>
+    <div id="daily-panel-content">
+      <div id="daily-icons-row" style="display:flex;"></div>
+      <div id="daily-svg-wrap">
+        <span id="daily-now-label">NOW</span>
+        <svg id="daily-svg" height="200"></svg>
+      </div>
+      <div id="daily-precip-row" style="display:flex;"></div>
+
+    <!-- SOUP SPEC: DAILY -->
+    <div class="soup-spec-bar">
+      <button class="soup-spec-btn" onclick="toggleSoup(this)">[ SOUP SPEC ]</button>
+    </div>
+    <div class="soup-spec-body">
+<span class="soup-spec-section">DATA SOURCE</span>
+<span class="soup-spec-key">provider</span>   open-meteo.com /v1/forecast?daily=...
+<span class="soup-spec-key">resolution</span> daily summary; fetched 16 days, display 7 or 14
+<span class="soup-spec-key">display</span>    7-day (default) or 14-day; toggle buttons top-right
+<span class="soup-spec-key">fields</span>     temperature_2m_max, temperature_2m_min,
+           precipitation_sum, weather_code, sunrise, sunset
+
+<span class="soup-spec-section">DATA SOUP</span>
+<span class="soup-spec-key">icons row</span>  WMO code → emoji; weekends in accent color
+           today's column tinted with accent background
+<span class="soup-spec-key">temp chart</span> SVG connected-range chart: max line (hot color) +
+           min line (cold color); shaded band between them
+           NOW dot marks current temp on today's column
+           🔥/🥶 emoji if avg > now+5°F or avg < now-5°F
+<span class="soup-spec-key">x-axis</span>    columns = days; no fixed y-axis — range auto-scales
+           to the min/max across the displayed window
+<span class="soup-spec-key">precip row</span> daily total mm → inches; "·" if zero
+    </div>
+  </div>
+
+
+  <div id="footer"></div>
+  <div id="footer-copyright" style="text-align:center;font-size:0.6rem;color:var(--fg-dim);padding:0 6px 8px;letter-spacing:0.08em;">© 2026 Lyrical Data · MIT License</div>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG
+   ============================================================ */
+// LOCATIONS
+const LOCATIONS = [
+  {label:'Chicago, IL',      lat:41.9,     lon:-87.9,    tz:'America/Chicago'},
+  {label:'Miami, FL',        lat:25.7617,  lon:-80.1918, tz:'America/New_York'},
+  {label:'San Francisco, CA',lat:37.7749,  lon:-122.4194,tz:'America/Los_Angeles'},
+  {label:'New York, NY',     lat:40.7128,  lon:-74.006,  tz:'America/New_York'},
+  {label:'London, UK',       lat:51.5074,  lon:-0.1278,  tz:'Europe/London'},
+  {label:'Paris, France',    lat:48.8566,  lon:2.3522,   tz:'Europe/Paris'},
+  {label:'Tokyo, Japan',     lat:35.6762,  lon:139.6503, tz:'Asia/Tokyo'},
+  {label:'Sydney, Australia',lat:-33.8688, lon:151.2093, tz:'Australia/Sydney'},
+  {label:'Nairobi, Kenya',   lat:-1.2921,  lon:36.8219,  tz:'Africa/Nairobi'},
+];
+
+let CONFIG = { ...LOCATIONS[0], refreshMinutes: 15 };
+let hourlyHours = 30;
+let dailyDays   = 7;
+let _lastData   = null;
+let _nowSkyView = 'current'; // 'current' or 'other'
+
+// Dynamic Wind Globals
+let _windAnimReq = null;
+let _windMph = 0;
+let _windDeg = 0;
+let _windCanvasSetup = false;
+let _windParticles = [];
+// Seed wind tunnel particles once
+for(let i = 0; i < 8; i++) {
+  _windParticles.push({
+    x: Math.random() * 80,
+    y: (Math.random() - 0.5) * 80,
+    l: 10 + Math.random() * 20, // line length
+    s: 0.5 + Math.random() * 1.5  // relative speed
+  });
+}
+
+/* ============================================================
+   SKIN TOGGLE
+   ============================================================ */
+let currentSkin = localStorage.getItem('wb-skin') || 'terminal';
+document.body.className = `skin-${currentSkin}`;
+document.getElementById('skin-toggle').addEventListener('click', () => {
+  currentSkin = currentSkin === 'terminal' ? 'kitschy' : 'terminal';
+  document.body.className = `skin-${currentSkin}`;
+  localStorage.setItem('wb-skin', currentSkin);
+  // redraw canvas with new skin colors
+  if (window._lastSunTimes) redrawNowSky();
+});
+
+/* ============================================================
+   UNIT HELPERS
+   ============================================================ */
+const toF  = c => Math.round(c * 9/5 + 32);
+const toMph = kph => Math.round(kph / 1.60934);
+const toIn  = mm => (mm / 25.4).toFixed(2);
+const round1 = n => Math.round(n * 10) / 10;
+
+/* ============================================================
+   WEATHER CODE → emoji + description
+   ============================================================ */
+const WMO = {
+  0:  {e:'☀️',  d:'Clear'},
+  1:  {e:'🌤️', d:'Mainly Clear'},
+  2:  {e:'⛅',  d:'Partly Cloudy'},
+  3:  {e:'☁️',  d:'Overcast'},
+  45: {e:'🌫️', d:'Fog'},
+  48: {e:'🌫️', d:'Icy Fog'},
+  51: {e:'🌦️', d:'Light Drizzle'},
+  53: {e:'🌦️', d:'Drizzle'},
+  55: {e:'🌧️', d:'Heavy Drizzle'},
+  61: {e:'🌧️', d:'Light Rain'},
+  63: {e:'🌧️', d:'Rain'},
+  65: {e:'🌧️', d:'Heavy Rain'},
+  71: {e:'🌨️', d:'Light Snow'},
+  73: {e:'🌨️', d:'Snow'},
+  75: {e:'❄️',  d:'Heavy Snow'},
+  77: {e:'🌨️', d:'Snow Grains'},
+  80: {e:'🌦️', d:'Showers'},
+  81: {e:'🌧️', d:'Showers'},
+  82: {e:'⛈️', d:'Heavy Showers'},
+  85: {e:'🌨️', d:'Snow Showers'},
+  86: {e:'❄️',  d:'Heavy Snow Showers'},
+  95: {e:'⛈️', d:'Thunderstorm'},
+  96: {e:'⛈️', d:'T-Storm + Hail'},
+  99: {e:'⛈️', d:'T-Storm + Heavy Hail'},
+};
+const wmo = code => WMO[code] || WMO[Math.floor(code/10)*10] || {e:'🌡️', d:'Unknown'};
+
+/* dew point (°F) → comfort emoji
+   Classification:
+   < 35°F  — 🌵 (bone dry / desert air)
+   35–49°F — 🙂 (comfortable / pleasant)
+   50–59°F — 😐 (OK, slightly humid)
+   60–69°F — 💧 (muggy / noticeable)
+   70+°F   — 🌊 (drowning / oppressive)
+*/
+const dewComfortEmoji = dewF => {
+  if (dewF < 35) return '🌵';
+  if (dewF < 50) return '🙂';
+  if (dewF < 60) return '😐';
+  if (dewF < 70) return '💧';
+  return '🌊';
+};
+
+/* UV index coloring */
+const uvColor = uv => {
+  const cs = getComputedStyle(document.body);
+  if (uv <= 2) return cs.getPropertyValue('--uv-low').trim();
+  if (uv <= 5) return cs.getPropertyValue('--uv-mid').trim();
+  return cs.getPropertyValue('--uv-high').trim();
+};
+
+/* wind direction degrees → arrow + cardinal */
+const windDir = deg => {
+  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  const arrows = ['↓','↙','←','↖','↑','↗','→','↘'];
+  const i = Math.round(deg / 45) % 8;
+  return {arrow: arrows[i], cardinal: dirs[i]};
+};
+
+/* format time from ISO string */
+const fmtHour = iso => {
+  const d = new Date(iso);
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}${ampm}`;
+};
+
+const fmtTime12 = d => {
+  let h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2,'0');
+  h = h % 12 || 12;
+  return `${h}:${m}`;
+};
+
+const fmtDay = iso => {
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('en-US', {weekday:'short'});
+};
+
+const fmtMD = iso => {
+  const d = new Date(iso + 'T12:00:00');
+  return `${d.getMonth()+1}/${d.getDate()}`;
+};
+
+/* ============================================================
+   CLOCK
+   ============================================================ */
+function getTzAbbr(tz) {
+  // Extract a short abbreviation from the IANA timezone using Intl
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'short'
+    }).formatToParts(new Date());
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    return tzPart ? tzPart.value : '';
+  } catch(e) { return ''; }
+}
+
+function tickClock() {
+  const tz = CONFIG.tz || 'America/Chicago';
+  const now = new Date();
+
+  // HH:MM with AM/PM in location's timezone
+  const hhmm = now.toLocaleTimeString('en-US', {
+    timeZone: tz,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+  document.getElementById('time-hhmm').textContent = hhmm;
+
+  // Seconds
+  const ss = ':' + String(now.toLocaleString('en-US', {timeZone: tz, second:'2-digit'}).padStart(2,'0'));
+  const ssNum = document.getElementById('time-ss-num');
+  if (ssNum) ssNum.textContent = ss;
+
+  // Timezone abbreviation
+  const tzEl = document.getElementById('time-tz');
+  if (tzEl) tzEl.textContent = getTzAbbr(tz);
+
+  // Date parts in location's timezone
+  document.getElementById('date-dow').textContent =
+    now.toLocaleDateString('en-US', {timeZone: tz, weekday:'long'});
+  document.getElementById('date-mdy').textContent =
+    now.toLocaleDateString('en-US', {timeZone: tz, month:'long', day:'numeric'});
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// Animate the globe pulse — starts immediately if world-polys.js already
+// resolved, otherwise waits for the 'worldpolysready' event.
+let _globeAnimReq = null;
+function animateGlobe() {
+  drawGlobe(CONFIG.lat, CONFIG.lon);
+  _globeAnimReq = requestAnimationFrame(animateGlobe);
+}
+function startGlobeWhenReady() {
+  // Defer one tick so the canvas has been laid out and has real height
+  setTimeout(() => animateGlobe(), 50);
+}
+if (window.WORLD_POLYS_READY) {
+  startGlobeWhenReady();
+} else {
+  window.addEventListener('worldpolysready', startGlobeWhenReady, { once: true });
+}
+
+/* ============================================================
+   FETCH OPEN-METEO
+   ============================================================ */
+async function fetchWeather() {
+  const base = 'https://api.open-meteo.com/v1/forecast';
+  const currentFields = [
+    'temperature_2m','relative_humidity_2m','dew_point_2m',
+    'apparent_temperature','precipitation','weather_code',
+    'cloud_cover','wind_speed_10m','wind_direction_10m','uv_index',
+  ].join(',');
+  const hourlyFields = [
+    'weather_code','temperature_2m','dew_point_2m','relative_humidity_2m',
+    'precipitation','wind_speed_10m','wind_direction_10m','uv_index',
+    'cloud_cover','is_day',
+  ].join(',');
+  const dailyFields = [
+    'temperature_2m_max','temperature_2m_min','precipitation_sum',
+    'weather_code','sunrise','sunset',
+  ].join(',');
+  // Use max days so we can switch range without refetch
+  const url = `${base}?latitude=${CONFIG.lat}&longitude=${CONFIG.lon}` +
+    `&timezone=${encodeURIComponent(CONFIG.tz)}` +
+    `&current=${encodeURIComponent(currentFields)}` +
+    `&hourly=${encodeURIComponent(hourlyFields)}` +
+    `&daily=${encodeURIComponent(dailyFields)}` +
+    `&forecast_days=16`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Open-Meteo API error ${res.status}`);
+  const data = await res.json();
+  if (!data.current) throw new Error('API response missing "current" block');
+  return data;
+}
+
+/* ============================================================
+   RENDER NOW
+   ============================================================ */
+function renderNow(data) {
+  const c = data.current;
+  const cw = data.current_weather || {};  // fallback
+  const d = data.daily;
+
+  const tempC  = c.temperature_2m   ?? cw.temperature   ?? 0;
+  const windKph = c.wind_speed_10m  ?? cw.windspeed      ?? 0;
+  const windDeg = c.wind_direction_10m ?? cw.winddirection ?? 0;
+  const wCode  = c.weather_code     ?? cw.weathercode    ?? 0;
+  const rh     = c.relative_humidity_2m ?? 0;
+  const dewC   = c.dew_point_2m     ?? 0;
+  const precip = c.precipitation    ?? 0;
+  const cloud  = c.cloud_cover      ?? 0;
+  const uvIdx  = c.uv_index         ?? 0;
+
+  const tempF = toF(tempC);
+  const w = wmo(wCode);
+  const wd = windDir(windDeg);
+
+  document.getElementById('now-temp-f').textContent = `${tempF}°F`;
+  document.getElementById('now-temp-c').textContent = `${Math.round(tempC)}°C`;
+  document.getElementById('now-condition').textContent = w.d;
+
+  // Color temp by hot/cold vs ambient
+  const tEl = document.getElementById('now-temp-f');
+  const cs = getComputedStyle(document.body);
+  if (tempF >= 85)      tEl.style.color = cs.getPropertyValue('--hot').trim();
+  else if (tempF <= 32) tEl.style.color = cs.getPropertyValue('--cold').trim();
+  else                  tEl.style.color = cs.getPropertyValue('--accent').trim();
+
+  // Sync wind variables for the animation canvas
+  _windMph = toMph(windKph);
+  _windDeg = windDeg;
+  if (!_windAnimReq) {
+    _windAnimReq = requestAnimationFrame(windAnimLoop);
+  }
+  // Update wind speed text label
+  const windLabelEl = document.getElementById('now-wind-label');
+  if (windLabelEl) windLabelEl.textContent = `${toMph(windKph)} MPH`;
+
+  // Stats
+  document.getElementById('now-humidity').textContent = `${Math.round(rh)}%`;
+  document.getElementById('now-dew').textContent = `${toF(dewC)}°`;
+  document.getElementById('now-precip').textContent = precip > 0 ? `${toIn(precip)}"` : '—';
+  // Comfort emoji next to humidity
+  const comfortEl = document.getElementById('now-comfort-emoji');
+  if (comfortEl) comfortEl.textContent = dewComfortEmoji(toF(dewC));
+
+  // Sun Arc
+  const srDt = new Date(d.sunrise[0]);
+  const ssDt = new Date(d.sunset[0]);
+  window._lastSunTimes = [srDt, ssDt];
+  window._lastCloudPct = cloud;
+  window._lastWeatherEmoji = w.e;
+  window._lastHourlyData = data.hourly;
+
+  // Reset to 'current' view on fresh load and update button labels
+  const now2 = new Date();
+  const isCurrentlyDay = now2 >= srDt && now2 <= ssDt;
+  _nowSkyView = 'current';
+  const skiBtns = document.getElementById('now-sky-btns');
+  if (skiBtns) {
+    skiBtns.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+    const curr = skiBtns.querySelector('[data-view="current"]');
+    if (curr) curr.classList.add('active');
+  }
+  updateNowSkyButtons(isCurrentlyDay);
+
+  requestAnimationFrame(() => drawSunArc(srDt, ssDt, cloud, w.e, data.hourly));
+  startNightSkyAnim();
+}
+
+/* ============================================================
+   DYNAMIC WIND ANIMATIONS (Terminal Arrow / Kitschy Anemometer)
+   ============================================================ */
+
+// Animated dash offset for terminal arrow texture
+let _terminalDashOffset = 0;
+
+function windAnimLoop(timestamp) {
+  const canvas = document.getElementById('wind-anim-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  if (!_windCanvasSetup) {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = 60 * dpr;
+    canvas.height = 60 * dpr;
+    ctx.scale(dpr, dpr);
+    _windCanvasSetup = true;
+  }
+  
+  const W = 60, H = 60;
+  ctx.clearRect(0, 0, W, H);
+
+  const isKitschy = document.body.classList.contains('skin-kitschy');
+  const cs = getComputedStyle(document.body);
+  const accent = cs.getPropertyValue('--accent').trim();
+  const fg3 = cs.getPropertyValue('--fg3').trim();
+  const fg2 = cs.getPropertyValue('--fg2').trim();
+  const fontDisplay = cs.getPropertyValue('--font-display').trim() || 'monospace';
+
+  if (isKitschy) {
+    // ── KITSCHY: Anemometer (speed label now in HTML .now-temp-footer) ────────
+    ctx.save();
+    ctx.translate(W / 2, H / 2 + 4); // slight downward offset to center pole visually
+
+    // Pole Base
+    ctx.fillStyle = fg3;
+    ctx.beginPath();
+    ctx.arc(0, 14, 5, 0, Math.PI, true);
+    ctx.fill();
+
+    // Pole
+    ctx.strokeStyle = fg3;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(0, 14);
+    ctx.stroke();
+
+    // Vane — tail points INTO the wind, head points WITH the wind.
+    // Wind direction = where wind comes FROM (meteorological convention).
+    // We want the arrowhead to point in the direction wind is GOING:
+    // that's windDeg + 180. On canvas: 0° = up (North), clockwise positive.
+    // Canvas angle = (windDeg + 180 - 90) = windDeg + 90
+    ctx.save();
+    ctx.translate(0, 0);
+    ctx.rotate(((_windDeg + 90) * Math.PI) / 180);
+    ctx.fillStyle = accent;
+    // Arrow: head on +x side (points in wind travel direction)
+    ctx.beginPath();
+    ctx.moveTo(15, 0);   // arrowhead tip
+    ctx.lineTo(6, 5);
+    ctx.lineTo(6, 2);
+    ctx.lineTo(-13, 2);
+    ctx.lineTo(-13, -2);
+    ctx.lineTo(6, -2);
+    ctx.lineTo(6, -5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Anemometer cups — at top of pole
+    ctx.save();
+    ctx.translate(0, -18);
+    // Speed: ~1 revolution per 3s at 13mph → 0.0021 rad/ms at 13mph
+    // Cap at a max rotation rate equivalent to ~50mph
+    const cappedMph = Math.min(_windMph, 50);
+    const radiansPerMs = Math.max(0.0003, cappedMph * 0.00016);
+    const rot = (timestamp * radiansPerMs) % (Math.PI * 2);
+    ctx.rotate(rot);
+
+    ctx.strokeStyle = accent;
+    ctx.fillStyle = fg3;
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 3; i++) {
+      ctx.rotate((Math.PI * 2) / 3);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(11, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(11, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Speed label — now rendered as HTML in .now-temp-footer, not on canvas
+    // ctx.fillText(`${_windMph} mph`, 0, 17);  // removed
+
+    ctx.restore();
+
+  } else {
+    // ── TERMINAL: Thick directional arrow with animated diagonal-line texture ─
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 4); // leave room at bottom for label
+
+    // Arrow points in the direction wind is travelling.
+    // windDeg = where wind comes FROM (met convention). Travel direction = windDeg + 180.
+    // Canvas: 0=up, clockwise. Canvas angle for "travel direction pointing right (+x)" needs +90.
+    // So: canvas rotate = (windDeg + 180 - 90) * PI/180 = (windDeg + 90) * PI/180
+    const arrowAngle = ((_windDeg + 90) * Math.PI) / 180;
+    ctx.rotate(arrowAngle);
+
+    // --- Draw thick arrow body as a filled chevron/polygon ---
+    const aW = 9;   // half-width of shaft
+    const sL = 18;  // shaft length (from centre back to head base)
+    const hW = 16;  // half-width of arrowhead
+    const hL = 12;  // length of arrowhead
+
+    // Arrow path: points in +x direction (right), centred at origin
+    ctx.beginPath();
+    ctx.moveTo(sL + hL, 0);           // tip
+    ctx.lineTo(sL, -hW);              // head right shoulder
+    ctx.lineTo(sL, -aW);              // shaft right
+    ctx.lineTo(-sL, -aW);             // shaft right back
+    ctx.lineTo(-sL, aW);              // shaft left back
+    ctx.lineTo(sL, aW);               // shaft left
+    ctx.lineTo(sL, hW);               // head left shoulder
+    ctx.closePath();
+
+    // Fill with a semi-transparent accent
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.18;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Outline with glow
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2.2;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = accent;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // --- Animated diagonal-line texture (speed indicator) ---
+    // Clip to the arrow shape, then draw animated diagonal stripes
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(sL + hL, 0);
+    ctx.lineTo(sL, -hW);
+    ctx.lineTo(sL, -aW);
+    ctx.lineTo(-sL, -aW);
+    ctx.lineTo(-sL, aW);
+    ctx.lineTo(sL, aW);
+    ctx.lineTo(sL, hW);
+    ctx.closePath();
+    ctx.clip();
+
+    // Animate offset: faster wind = faster moving lines
+    const dashSpeed = Math.max(0.05, _windMph * 0.04);
+    _terminalDashOffset = (_terminalDashOffset + dashSpeed) % 14;
+
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.55;
+    const stripeGap = 7;
+    const stripeAngle = Math.PI / 4; // 45°
+    const cosA = Math.cos(stripeAngle);
+    const sinA = Math.sin(stripeAngle);
+    // Draw diagonal stripes across a generous bounding box
+    for (let d = -80 + _terminalDashOffset; d < 80; d += stripeGap) {
+      ctx.beginPath();
+      ctx.moveTo(d * cosA - 60 * sinA, d * sinA + 60 * cosA);
+      ctx.lineTo(d * cosA + 60 * sinA, d * sinA - 60 * cosA);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    ctx.restore(); // undo rotation + translation
+
+    // Speed label — now rendered as HTML in .now-temp-footer, not on canvas
+    // ctx.fillText(`${_windMph} mph`, W / 2, H - 2);  // removed
+  }
+
+  _windAnimReq = requestAnimationFrame(windAnimLoop);
+}
+
+/* ============================================================
+   STAR CATALOG — named bright stars, real RA/Dec (J2000)
+   ra = right ascension in decimal hours (0–24)
+   dec = declination in decimal degrees (-90 to +90)
+   mag = apparent magnitude (lower = brighter; <1.5 drawn largest)
+   name = popular name shown as label
+   con = constellation abbreviation (for line drawing)
+   ============================================================ */
+const STARS = [
+  // The navigation / "planisphere" stars — well-known, spread across the sky
+  {name:'Sirius',     ra:6.7525,  dec:-16.7161, mag:-1.46, con:'CMa'},
+  {name:'Canopus',    ra:6.3992,  dec:-52.6957, mag:-0.72, con:'Car'},
+  {name:'Arcturus',   ra:14.2612, dec:19.1822,  mag:-0.05, con:'Boo'},
+  {name:'Vega',       ra:18.6157, dec:38.7836,  mag:0.03,  con:'Lyr'},
+  {name:'Capella',    ra:5.2781,  dec:45.9981,  mag:0.08,  con:'Aur'},
+  {name:'Rigel',      ra:5.2423,  dec:-8.2016,  mag:0.13,  con:'Ori'},
+  {name:'Procyon',    ra:7.6552,  dec:5.2250,   mag:0.34,  con:'CMi'},
+  {name:'Betelgeuse', ra:5.9195,  dec:7.4070,   mag:0.42,  con:'Ori'},
+  {name:'Altair',     ra:19.8464, dec:8.8683,   mag:0.77,  con:'Aql'},
+  {name:'Aldebaran',  ra:4.5987,  dec:16.5093,  mag:0.87,  con:'Tau'},
+  {name:'Antares',    ra:16.4901, dec:-26.4320, mag:1.06,  con:'Sco'},
+  {name:'Spica',      ra:13.4199, dec:-11.1613, mag:1.04,  con:'Vir'},
+  {name:'Pollux',     ra:7.7553,  dec:28.0262,  mag:1.16,  con:'Gem'},
+  {name:'Fomalhaut',  ra:22.9608, dec:-29.6223, mag:1.17,  con:'PsA'},
+  {name:'Deneb',      ra:20.6905, dec:45.2803,  mag:1.25,  con:'Cyg'},
+  {name:'Regulus',    ra:10.1395, dec:11.9672,  mag:1.36,  con:'Leo'},
+  {name:'Castor',     ra:7.5767,  dec:31.8883,  mag:1.58,  con:'Gem'},
+  {name:'Bellatrix',  ra:5.4188,  dec:6.3497,   mag:1.64,  con:'Ori'},
+  {name:'Elnath',     ra:5.4382,  dec:28.6075,  mag:1.65,  con:'Tau'},
+  {name:'Alnilam',    ra:5.6036,  dec:-1.2019,  mag:1.69,  con:'Ori'}, // Orion belt mid
+  {name:'Alnitak',    ra:5.6793,  dec:-1.9426,  mag:1.74,  con:'Ori'}, // Orion belt left
+  {name:'Mintaka',    ra:5.5334,  dec:-0.2991,  mag:2.23,  con:'Ori'}, // Orion belt right
+  {name:'Polaris',    ra:2.5302,  dec:89.2641,  mag:1.97,  con:'UMi'},
+  {name:'Dubhe',      ra:11.0621, dec:61.7510,  mag:1.81,  con:'UMa'},
+  {name:'Merak',      ra:11.0306, dec:56.3824,  mag:2.34,  con:'UMa'},
+  {name:'Phecda',     ra:11.8977, dec:53.6948,  mag:2.44,  con:'UMa'},
+  {name:'Megrez',     ra:12.2574, dec:57.0326,  mag:3.32,  con:'UMa'},
+  {name:'Alioth',     ra:12.9004, dec:55.9598,  mag:1.76,  con:'UMa'},
+  {name:'Mizar',      ra:13.3988, dec:54.9254,  mag:2.23,  con:'UMa'},
+  {name:'Alkaid',     ra:13.7923, dec:49.3133,  mag:1.85,  con:'UMa'},
+  {name:'Denebola',   ra:11.8177, dec:14.5720,  mag:2.14,  con:'Leo'},
+  {name:'Zosma',      ra:11.2353, dec:20.5237,  mag:2.56,  con:'Leo'},
+  {name:'Algieba',    ra:10.3328, dec:19.8415,  mag:2.01,  con:'Leo'},
+  {name:'Saiph',      ra:5.7959,  dec:-9.6696,  mag:2.07,  con:'Ori'},
+  {name:'Rigil Kent', ra:14.6600, dec:-60.8340, mag:-0.27, con:'Cen'},
+  {name:'Hadar',      ra:14.0637, dec:-60.3730, mag:0.60,  con:'Cen'},
+  {name:'Mimosa',     ra:12.7954, dec:-59.6888, mag:1.25,  con:'Cru'},
+  {name:'Acrux',      ra:12.4433, dec:-63.0990, mag:0.77,  con:'Cru'},
+  {name:'Achernar',   ra:1.6286,  dec:-57.2367, mag:0.45,  con:'Eri'},
+  {name:'Shaula',     ra:17.5603, dec:-37.1040, mag:1.62,  con:'Sco'},
+  {name:'Sargas',     ra:17.6219, dec:-42.9978, mag:1.86,  con:'Sco'},
+  {name:'Graffias',   ra:16.0908, dec:-19.8053, mag:2.62,  con:'Sco'},
+  {name:'Dschubba',   ra:16.0056, dec:-22.6217, mag:2.32,  con:'Sco'},
+  {name:'Nunki',      ra:18.9211, dec:-26.2967, mag:2.05,  con:'Sgr'},
+  {name:'Kaus Aus.',  ra:18.4028, dec:-34.3846, mag:1.85,  con:'Sgr'},
+  {name:'Rasalhague', ra:17.5823, dec:12.5600,  mag:2.07,  con:'Oph'},
+  {name:'Eltanin',    ra:17.9434, dec:51.4889,  mag:2.24,  con:'Dra'},
+  {name:'Schedar',    ra:0.6751,  dec:56.5373,  mag:2.24,  con:'Cas'},
+  {name:'Caph',       ra:0.1529,  dec:59.1498,  mag:2.28,  con:'Cas'},
+  {name:'Ruchbah',    ra:1.4304,  dec:60.2353,  mag:2.68,  con:'Cas'},
+  {name:'Segin',      ra:1.9063,  dec:63.6701,  mag:3.35,  con:'Cas'},
+  {name:'Navi',       ra:0.9451,  dec:60.7167,  mag:2.15,  con:'Cas'},
+  {name:'Mirfak',     ra:3.4053,  dec:49.8612,  mag:1.79,  con:'Per'},
+  {name:'Algol',      ra:3.1361,  dec:40.9557,  mag:2.09,  con:'Per'},
+  {name:'Hamal',      ra:2.1196,  dec:23.4624,  mag:2.01,  con:'Ari'},
+  {name:'Menkar',     ra:3.0382,  dec:4.0897,   mag:2.54,  con:'Cet'},
+  {name:'Alpheratz',  ra:0.1398,  dec:29.0904,  mag:2.07,  con:'And'},
+  {name:'Algenib',    ra:0.2211,  dec:15.1836,  mag:2.83,  con:'Peg'},
+  {name:'Markab',     ra:23.0794, dec:15.2053,  mag:2.49,  con:'Peg'},
+  {name:'Scheat',     ra:23.0629, dec:28.0828,  mag:2.42,  con:'Peg'},
+  {name:'Enif',       ra:21.7364, dec:9.8750,   mag:2.38,  con:'Peg'},
+  {name:'Sadalsuud',  ra:21.5259, dec:-5.5712,  mag:2.90,  con:'Aqr'},
+  {name:'Sadalmelik', ra:22.0961, dec:-0.3198,  mag:2.96,  con:'Aqr'},
+];
+
+// Constellation stick figures: pairs of star names to connect with lines
+const CONSTELLATION_LINES = {
+  'Ori': [['Betelgeuse','Bellatrix'],['Betelgeuse','Alnilam'],['Rigel','Saiph'],
+          ['Rigel','Alnilam'],['Alnilam','Alnitak'],['Alnilam','Mintaka'],
+          ['Bellatrix','Mintaka'],['Saiph','Alnitak']],
+  'UMa': [['Dubhe','Merak'],['Merak','Phecda'],['Phecda','Megrez'],
+          ['Megrez','Alioth'],['Alioth','Mizar'],['Mizar','Alkaid'],
+          ['Megrez','Dubhe']],
+  'Cas': [['Caph','Schedar'],['Schedar','Navi'],['Navi','Ruchbah'],['Ruchbah','Segin']],
+  'Leo': [['Regulus','Algieba'],['Algieba','Zosma'],['Zosma','Denebola'],
+          ['Regulus','Denebola']],
+  'Gem': [['Pollux','Castor']],
+  'Sco': [['Graffias','Dschubba'],['Dschubba','Antares'],['Antares','Shaula'],
+          ['Shaula','Sargas']],
+};
+
+/* ============================================================
+   CONSTELLATION SKY DRAWING
+   Projects named stars using local sidereal time + observer lat
+   onto the canvas (azimuth/altitude → x/y).
+   ============================================================ */
+function drawConstellationSky(ctx, W, H, cloudPct, obsvLat, obsvLon, isKitschy) {
+  // ── Sky background: deep blue-black gradient ──
+  const c = cloudPct / 100;
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+  if (isKitschy) {
+    skyGrad.addColorStop(0, `rgba(${lerpColor([10,5,40],[60,60,75],c)},0.92)`);
+    skyGrad.addColorStop(1, `rgba(${lerpColor([30,15,60],[80,80,90],c)},0.45)`);
+  } else {
+    skyGrad.addColorStop(0, `rgba(${lerpColor([2,4,18],[18,22,26],c)},0.96)`);
+    skyGrad.addColorStop(1, `rgba(${lerpColor([4,10,8],[14,18,16],c)},0.40)`);
+  }
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Cloud veil: thicker cloud = more washed out
+  if (c > 0.1) {
+    ctx.fillStyle = isKitschy
+      ? `rgba(180,170,200,${c * 0.55})`
+      : `rgba(20,30,25,${c * 0.65})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Compute Local Sidereal Time ──
+  // Julian Date for current UTC moment
+  const now = new Date();
+  const JD = now.getTime() / 86400000 + 2440587.5;
+  // Greenwich Mean Sidereal Time in hours (IAU formula)
+  const T = (JD - 2451545.0) / 36525.0;
+  const GMST_deg = 280.46061837 + 360.98564736629 * (JD - 2451545.0)
+                 + T * T * 0.000387933 - T * T * T / 38710000;
+  const GMST_h = ((GMST_deg % 360) + 360) % 360 / 15; // hours
+  const LST = ((GMST_h + obsvLon / 15) % 24 + 24) % 24; // hours
+
+  const latRad = obsvLat * Math.PI / 180;
+
+  // ── Project each star: equatorial → horizontal → canvas ──
+  // Returns {x, y, visible, alt} or null
+  function projectStar(ra_h, dec_deg) {
+    const HA = ((LST - ra_h) % 24 + 24) % 24; // hour angle 0–24h
+    const HA_rad = HA * Math.PI / 12;          // radians
+    const dec_rad = dec_deg * Math.PI / 180;
+
+    // Altitude (elevation above horizon)
+    const sinAlt = Math.sin(latRad) * Math.sin(dec_rad)
+                 + Math.cos(latRad) * Math.cos(dec_rad) * Math.cos(HA_rad);
+    const alt = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+
+    // Azimuth (N=0, E=90, S=180, W=270)
+    const cosAz = (Math.sin(dec_rad) - Math.sin(latRad) * sinAlt)
+                / (Math.cos(latRad) * Math.cos(alt));
+    let az = Math.acos(Math.max(-1, Math.min(1, cosAz)));
+    if (Math.sin(HA_rad) > 0) az = 2 * Math.PI - az;
+
+    const altDeg = alt * 180 / Math.PI;
+    if (altDeg < -5) return null; // below horizon (with small buffer)
+
+    // ── Map az/alt to canvas x/y ──
+    // Projection: stereographic-like from zenith
+    // altitude=90 → center, altitude=0 → edge, azimuth wraps around
+    // We show a wide-field view: 180° FOV (full hemisphere)
+    // rho = distance from center ∝ (90 - alt)
+    const rho = (90 - altDeg) / 90; // 0 at zenith, 1 at horizon
+    // Canvas: center is zenith. North=top (az=0 → top)
+    // x: East is right: az=90→right, az=270→left
+    const cx = W / 2;
+    const cy = H / 2;
+    const R  = Math.min(W, H) * 0.52; // radius of horizon circle
+    const x = cx + R * rho * Math.sin(az);
+    const y = cy - R * rho * Math.cos(az);
+
+    return {x, y, alt: altDeg, az: az * 180 / Math.PI};
+  }
+
+  // ── Draw cardinal direction labels ──
+  const cardinals = [{label:'N',az:0},{label:'E',az:90},{label:'S',az:180},{label:'W',az:270}];
+  ctx.save();
+  ctx.font = `9px 'Share Tech Mono', monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const cardColor = isKitschy ? 'rgba(150,100,50,0.55)' : 'rgba(0,180,60,0.35)';
+  ctx.fillStyle = cardColor;
+  for (const cd of cardinals) {
+    const azR = cd.az * Math.PI / 180;
+    const cx2 = W/2 + Math.min(W,H)*0.50 * Math.sin(azR);
+    const cy2 = H/2 - Math.min(W,H)*0.50 * Math.cos(azR);
+    ctx.fillText(cd.label, cx2, cy2);
+  }
+  ctx.restore();
+
+  // ── Draw constellation stick lines (behind stars) ──
+  ctx.save();
+  ctx.lineWidth = 0.6;
+  ctx.strokeStyle = isKitschy ? 'rgba(180,140,220,0.25)' : 'rgba(80,160,255,0.18)';
+  const starPosCache = {};
+  for (const s of STARS) {
+    const p = projectStar(s.ra, s.dec);
+    if (p) starPosCache[s.name] = p;
+  }
+  for (const [con, pairs] of Object.entries(CONSTELLATION_LINES)) {
+    for (const [a, b] of pairs) {
+      const pa = starPosCache[a], pb = starPosCache[b];
+      if (!pa || !pb) continue;
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // ── Draw stars ──
+  // cloud veil reduces star opacity
+  const starOpacity = Math.max(0.05, 1 - c * 0.92);
+  const labeledStars = []; // collect for label pass
+
+  for (const s of STARS) {
+    const p = projectStar(s.ra, s.dec);
+    if (!p) continue;
+
+    // Star radius by magnitude
+    const r = s.mag < 0   ? 3.2
+            : s.mag < 0.5 ? 2.8
+            : s.mag < 1.0 ? 2.3
+            : s.mag < 1.5 ? 1.9
+            : s.mag < 2.0 ? 1.5
+            : s.mag < 2.5 ? 1.2
+            :                0.9;
+
+    // Color: hot (blue-white) for brightest, warm (yellow-white) for others
+    const starColor = s.mag < 1.0
+      ? (isKitschy ? `rgba(200,220,255,${starOpacity})` : `rgba(160,210,255,${starOpacity})`)
+      : s.mag < 1.8
+      ? (isKitschy ? `rgba(255,255,240,${starOpacity})` : `rgba(220,255,220,${starOpacity * 0.9})`)
+      : (isKitschy ? `rgba(255,240,200,${starOpacity * 0.8})` : `rgba(180,255,180,${starOpacity * 0.75})`);
+
+    // Glow halo for brightest stars
+    if (s.mag < 1.5 && starOpacity > 0.2) {
+      const glow = ctx.createRadialGradient(p.x, p.y, r * 0.5, p.x, p.y, r * 4.5);
+      const glowA = starOpacity * (s.mag < 0 ? 0.55 : 0.35);
+      glow.addColorStop(0, isKitschy ? `rgba(220,220,255,${glowA})` : `rgba(100,200,255,${glowA})`);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = starColor;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Collect labeled stars (bright enough + have a name)
+    if (s.mag < 2.0 && s.name) {
+      labeledStars.push({...s, ...p, r});
+    }
+  }
+
+  // ── Draw star name labels ── (second pass, so they sit on top)
+  ctx.save();
+  ctx.font = isKitschy ? `9px Fredoka, sans-serif` : `8px 'Share Tech Mono', monospace`;
+  ctx.textBaseline = 'bottom';
+  for (const s of labeledStars) {
+    const alpha = starOpacity * (s.mag < 1 ? 0.90 : 0.70);
+    ctx.fillStyle = isKitschy ? `rgba(220,200,255,${alpha})` : `rgba(120,220,120,${alpha})`;
+    ctx.textAlign = s.x > W * 0.7 ? 'right' : 'left';
+    const lx = s.x > W * 0.7 ? s.x - s.r - 2 : s.x + s.r + 2;
+    ctx.fillText(s.name, lx, s.y);
+  }
+  ctx.restore();
+
+  // ── Horizon line ──
+  ctx.save();
+  ctx.strokeStyle = isKitschy ? 'rgba(180,140,80,0.4)' : 'rgba(0,180,60,0.30)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 6]);
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  ctx.lineTo(W, H);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawSunArc(srDt, ssDt, cloudPct = 0, weatherEmoji = '☀️', hourlyData = null) {
+  const canvas = document.getElementById('sun-arc-canvas');
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const dpr  = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(rect.width  * dpr) || 440;
+  canvas.height = Math.round(rect.height * dpr) || 140;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width  || 440;
+  const H = rect.height || 140;
+
+  const isKitschy = document.body.classList.contains('skin-kitschy');
+  const cs = getComputedStyle(document.body);
+  const monoFont = isKitschy ? 'Fredoka, sans-serif' : 'Share Tech Mono, monospace';
+
+  // ── KNOB: layout ───────────────────────────────────────────────────────
+  const padX   = 10;       // KNOB: left/right inset for arc endpoints
+  const labelH = 20;       // KNOB: height of label strip below horizon
+  const horizY = H - labelH;
+  const arcRx  = (W - padX * 2) / 2;   // KNOB: arc horizontal radius
+  const arcRy  = horizY - 6;            // KNOB: arc peak height above horizon
+  const arcCx  = W / 2;
+  // ──────────────────────────────────────────────────────────────────────
+
+  const fg3    = cs.getPropertyValue('--fg3').trim()    || '#aaa';
+  const fgDim  = cs.getPropertyValue('--fg-dim').trim() || '#888';
+  const borderC= cs.getPropertyValue('--border').trim() || '#ccc';
+
+  // ── SKY GRADIENT: cloud=0 → clear blue, cloud=100 → overcast gray ─────
+  // KNOB: edit these RGB arrays to shift the sky palette
+  const c = cloudPct / 100; // 0..1
+  const skyTop    = isKitschy
+    ? lerpColor([135, 196, 255], [170, 170, 185], c)   // clear blue → overcast gray-blue
+    : lerpColor([10,  60,  120], [40,  50,  55],  c);  // deep navy → dark slate
+  const skyBottom = isKitschy
+    ? lerpColor([255, 235, 185], [215, 215, 215], c)   // warm cream → cool gray
+    : lerpColor([20,  40,  20],  [30,  35,  30],  c);  // dark green → near-black
+  // KNOB: sky opacity
+  const skyOpacity = isKitschy ? 0.6 : 0.75;
+
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, horizY);
+  skyGrad.addColorStop(0, `rgba(${skyTop},${skyOpacity})`);
+  skyGrad.addColorStop(1, `rgba(${skyBottom},${skyOpacity * 0.35})`);
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, horizY);
+
+  // ── HORIZON LINE ──
+  ctx.strokeStyle = isKitschy
+    ? `rgba(180,120,60,${0.3 + c * 0.2})`
+    : borderC;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.moveTo(padX, horizY);
+  ctx.lineTo(W - padX, horizY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── SUN/MOON POSITION ──
+  const now = new Date();
+  const isBelowHorizon = now < srDt || now > ssDt;
+  let t = (now - srDt) / (ssDt - srDt);
+  t = Math.max(0, Math.min(1, t));
+  const angle = Math.PI - t * Math.PI;
+  const sunX = arcCx + arcRx * Math.cos(angle);
+  const sunY = horizY - arcRy * Math.sin(angle);
+
+  // Moon position: use time through the night arc (sunset → next sunrise, ~12h span)
+  // Approximate night length as 24h minus day length
+  const dayMs = ssDt - srDt;
+  const nightMs = 24 * 3600000 - dayMs;
+  let moonT; // 0=sunset end, 1=next sunrise end
+  if (now > ssDt) {
+    moonT = (now - ssDt) / nightMs;
+  } else {
+    // Pre-dawn: time since "last sunset" ≈ now - (srDt - nightMs)
+    moonT = (now - (srDt.getTime() - nightMs)) / nightMs;
+  }
+  moonT = Math.max(0, Math.min(1, moonT));
+  // Night arc runs right→left (sunset side to sunrise side), same ellipse, below horizon mirrored above
+  // Map moonT: 0 → right end (sunset, angle=0), 1 → left end (sunrise, angle=PI)
+  const moonAngle = moonT * Math.PI; // 0 to PI
+  const moonX = arcCx + arcRx * Math.cos(moonAngle);
+  const moonY = horizY - arcRy * Math.sin(moonAngle); // same arc geometry above horizon
+  // Helper: point on the ellipse at fractional parameter u (0=sunrise end, 1=sunset end)
+  const arcPt = u => ({
+    x: arcCx + arcRx * Math.cos(Math.PI - u * Math.PI),
+    y: horizY - arcRy * Math.sin(Math.PI - u * Math.PI),
+  });
+
+  // ── ARC ── split into travelled (solid/bright) and remaining (dim/dashed)
+  const arcAlpha = 0.55 + (1 - c) * 0.3;
+  if (!isBelowHorizon) {
+    // Travelled portion: left (sunrise) → sun position
+    ctx.save();
+    ctx.strokeStyle = isKitschy
+      ? `rgba(255,160,40,${arcAlpha})`
+      : `rgba(0,255,65,${arcAlpha})`;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    if (!isKitschy) { ctx.shadowBlur = 5; ctx.shadowColor = 'rgba(0,255,65,0.45)'; }
+    ctx.beginPath();
+    // from startAngle=Math.PI (left = sunrise) counter-clockwise to current angle
+    ctx.ellipse(arcCx, horizY, arcRx, arcRy, 0, Math.PI, angle, false);
+    ctx.stroke();
+    ctx.restore();
+
+    // Remaining portion: sun position → right (sunset), dashed dim
+    ctx.save();
+    ctx.strokeStyle = isKitschy
+      ? `rgba(200,130,60,${arcAlpha * 0.38})`
+      : `rgba(0,200,60,${arcAlpha * 0.28})`;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath();
+    ctx.ellipse(arcCx, horizY, arcRx, arcRy, 0, angle, 0, false);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // Hourly tick marks along the arc
+    const dayMs = ssDt - srDt;
+    const totalHours = Math.round(dayMs / 3600000);
+    for (let h = 1; h < totalHours; h++) {
+      const ht = h / totalHours;
+      const hPt = arcPt(ht);
+      const isPast = ht <= t;
+      // compute normal direction at this point on ellipse
+      const dxT = -arcRx * Math.sin(Math.PI - ht * Math.PI);
+      const dyT =  arcRy * Math.cos(Math.PI - ht * Math.PI);
+      const len = Math.sqrt(dxT*dxT + dyT*dyT);
+      const nx = -dyT / len, ny = dxT / len;
+      const tickLen = (h % 6 === 0) ? 5 : 3;
+      ctx.save();
+      ctx.strokeStyle = isKitschy
+        ? `rgba(180,100,20,${isPast ? 0.65 : 0.22})`
+        : `rgba(0,255,65,${isPast ? 0.55 : 0.16})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(hPt.x + nx * tickLen, hPt.y + ny * tickLen);
+      ctx.lineTo(hPt.x - nx * tickLen, hPt.y - ny * tickLen);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ── ARC SKY ICONS: plot weather transitions across today's daytime arc ──
+    if (hourlyData) {
+      const hTimes = hourlyData.time.map(t => new Date(t));
+      // Collect daytime hours within today's sunrise→sunset window
+      const dayHours = [];
+      for (let i = 0; i < hTimes.length; i++) {
+        if (hTimes[i] >= srDt && hTimes[i] <= ssDt) {
+          dayHours.push({
+            dt: hTimes[i],
+            wCode: hourlyData.weather_code[i],
+            isDay: hourlyData.is_day[i],
+          });
+        }
+      }
+      // Build transition list: first + when sky category changes
+      const transitions = [];
+      let lastCat = -1;
+      for (const h of dayHours) {
+        const cat = h.wCode < 10 ? h.wCode : Math.floor(h.wCode / 10);
+        if (cat !== lastCat) {
+          transitions.push(h);
+          lastCat = cat;
+        }
+      }
+      // Draw each transition icon on the arc (skip the one closest to the current sun position)
+      const totalDayMs = ssDt - srDt;
+      for (const h of transitions) {
+        const ht = (h.dt - srDt) / totalDayMs; // 0=sunrise, 1=sunset
+        if (ht < 0 || ht > 1) continue;
+        const wInfo = wmo(h.wCode);
+        const hPt = arcPt(ht);
+        // Skip if this icon would overlap the current sun position (within 8% of arc)
+        const tDist = Math.abs(ht - t);
+        if (tDist < 0.08) continue;
+        // Smaller, semi-transparent icons for the forecast
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.font = '13px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(wInfo.e, hPt.x, hPt.y);
+        ctx.restore();
+      }
+    }
+
+    // Sun glow halo + emoji — NOW icon: large, fully opaque
+    const glowAlpha = 0.5 * (1 - c * 0.7);
+    if (glowAlpha > 0.05) {
+      const grad = ctx.createRadialGradient(sunX, sunY, 2, sunX, sunY, 26);
+      grad.addColorStop(0, `rgba(255,220,80,${glowAlpha})`);
+      grad.addColorStop(1, 'rgba(255,180,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, 26, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
+    ctx.font = '28px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(weatherEmoji, sunX, sunY);
+    ctx.globalAlpha = 1;
+  } else {
+    // ── NIGHT: CONSTELLATION SKY ──────────────────────────────────────────
+    drawConstellationSky(ctx, W, horizY, cloudPct, CONFIG.lat, CONFIG.lon, isKitschy);
+    // Moon emoji pinned to top-right corner as night mode indicator
+    ctx.font = '14px serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.globalAlpha = 0.75;
+    ctx.fillText('🌙', W - 6, 4);
+    ctx.globalAlpha = 1;
+  }
+
+  // ── LABEL STRIP ──
+  const labelY = horizY + 3;
+  const labelColor = isKitschy ? '#9b6030' : fg3;
+
+  ctx.fillStyle = labelColor;
+  ctx.font = `10px ${monoFont}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('\ud83c\udf05 ' + fmtTime12(srDt), padX + 4, labelY);
+
+  const dlMin = Math.round((ssDt - srDt) / 60000);
+  ctx.fillStyle = fgDim;
+  ctx.textAlign = 'center';
+  ctx.fillText(`${Math.floor(dlMin/60)}h ${dlMin%60}m`, W / 2, labelY);
+
+  ctx.fillStyle = labelColor;
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtTime12(ssDt) + ' \ud83c\udfd7\ufe0f', W - padX - 4, labelY);
+}
+
+// color lerp helper: [r,g,b] arrays → "r,g,b" string for rgba()
+function lerpColor(a, b, t) {
+  return a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',');
+}
+
+/* ============================================================
+   NIGHT SKY ANIMATION LOOP
+   Redraws constellation sky every ~30 seconds (stars move slowly;
+   no need for 60fps — just enough that the sky stays live)
+   ============================================================ */
+let _nightSkyAnimInterval = null;
+
+function startNightSkyAnim() {
+  stopNightSkyAnim();
+  function redrawIfNight() {
+    if (!window._lastSunTimes) return;
+    if (_nowSkyView !== 'current') return; // don't override toggled view
+    const [srDt, ssDt] = window._lastSunTimes;
+    const now = new Date();
+    if (now < srDt || now > ssDt) {
+      drawSunArc(srDt, ssDt, window._lastCloudPct ?? 0,
+                 window._lastWeatherEmoji ?? '☀️',
+                 window._lastHourlyData ?? null);
+    }
+  }
+  redrawIfNight(); // immediate draw
+  _nightSkyAnimInterval = setInterval(redrawIfNight, 30000); // refresh every 30s
+}
+
+function stopNightSkyAnim() {
+  if (_nightSkyAnimInterval) { clearInterval(_nightSkyAnimInterval); _nightSkyAnimInterval = null; }
+}
+
+/* ============================================================
+   NOW SKY VIEW TOGGLE HELPERS
+   ============================================================ */
+
+// Update button labels based on whether it's currently day or night
+function updateNowSkyButtons(isCurrentlyDay) {
+  const btnCurrent = document.getElementById('now-sky-btn-current');
+  const btnOther   = document.getElementById('now-sky-btn-other');
+  if (!btnCurrent || !btnOther) return;
+  if (isCurrentlyDay) {
+    btnCurrent.textContent = 'Daytime Sky';
+    btnOther.textContent   = 'Upcoming Night';
+  } else {
+    btnCurrent.textContent = 'Nighttime Sky';
+    btnOther.textContent   = 'Upcoming Day';
+  }
+}
+
+// Redraw the sun-arc canvas using the currently selected view
+function redrawNowSky() {
+  if (!window._lastSunTimes) return;
+  const [srDt, ssDt] = window._lastSunTimes;
+  const now = new Date();
+  const isCurrentlyDay = now >= srDt && now <= ssDt;
+  const cloud   = window._lastCloudPct    ?? 0;
+  const emoji   = window._lastWeatherEmoji ?? '☀️';
+  const hourly  = window._lastHourlyData  ?? null;
+  const data    = _lastData;
+
+  if (_nowSkyView === 'current') {
+    // Show the natural current state
+    drawSunArc(srDt, ssDt, cloud, emoji, hourly);
+  } else {
+    // Show the "other" period:
+    // If currently day  → show the upcoming night arc (tonight's sunset→tomorrow's sunrise)
+    // If currently night → show the upcoming day arc (today's/tomorrow's sunrise→sunset)
+    if (isCurrentlyDay) {
+      // Upcoming night: use today's sunset as start, tomorrow's sunrise as end
+      // We treat it like drawing "nighttime": pass srDt/ssDt but force isBelowHorizon=true
+      // Easiest: draw with times that make "now" appear past sunset
+      // We draw the constellation sky by calling drawSunArcNight()
+      drawSunArcForceNight(srDt, ssDt, cloud, emoji, hourly);
+    } else {
+      // Upcoming day: find tomorrow's sunrise/sunset from daily data
+      if (data && data.daily && data.daily.sunrise.length > 1) {
+        const nextSr = new Date(data.daily.sunrise[1]);
+        const nextSs = new Date(data.daily.sunset[1]);
+        // Find tomorrow's weather emoji (day 1 in daily)
+        const tomorrowCode = data.daily.weather_code[1] ?? 0;
+        const tomorrowEmoji = wmo(tomorrowCode).e;
+        drawSunArcForceDay(nextSr, nextSs, cloud, tomorrowEmoji, hourly);
+      } else {
+        // Fallback: just redraw normally
+        drawSunArc(srDt, ssDt, cloud, emoji, hourly);
+      }
+    }
+  }
+}
+
+// Draw the sun arc canvas forced into "night" mode (constellation sky preview)
+function drawSunArcForceNight(srDt, ssDt, cloudPct, weatherEmoji, hourlyData) {
+  const canvas = document.getElementById('sun-arc-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr  = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(rect.width  * dpr) || 440;
+  canvas.height = Math.round(rect.height * dpr) || 140;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width  || 440;
+  const H = rect.height || 140;
+  const isKitschy = document.body.classList.contains('skin-kitschy');
+  const cs = getComputedStyle(document.body);
+  const monoFont = isKitschy ? 'Fredoka, sans-serif' : 'Share Tech Mono, monospace';
+  const padX = 10, labelH = 20;
+  const horizY = H - labelH;
+  const arcRx = (W - padX * 2) / 2;
+  const arcRy = horizY - 6;
+  const arcCx = W / 2;
+  const fg3   = cs.getPropertyValue('--fg3').trim()    || '#aaa';
+  const fgDim = cs.getPropertyValue('--fg-dim').trim() || '#888';
+  const c = cloudPct / 100;
+
+  // Draw night sky
+  drawConstellationSky(ctx, W, horizY, cloudPct, CONFIG.lat, CONFIG.lon, isKitschy);
+
+  // Horizon divider
+  ctx.strokeStyle = isKitschy ? `rgba(180,120,60,${0.3+c*0.2})` : cs.getPropertyValue('--border').trim();
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.moveTo(padX, horizY);
+  ctx.lineTo(W - padX, horizY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // "Tonight" label in corner
+  ctx.font = '14px serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.globalAlpha = 0.75;
+  ctx.fillText('🌙', W - 6, 4);
+  ctx.globalAlpha = 1;
+
+  // Label strip: show today's sunset → tomorrow's estimated sunrise
+  const dayMs   = ssDt - srDt;
+  const nightMs = 24 * 3600000 - dayMs;
+  const nextSr  = new Date(ssDt.getTime() + nightMs);
+  const labelY  = horizY + 3;
+  const labelColor = isKitschy ? '#9b6030' : fg3;
+
+  ctx.fillStyle = labelColor;
+  ctx.font = `10px ${monoFont}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('🌇 ' + fmtTime12(ssDt), padX + 4, labelY);
+
+  const nlMin = Math.round(nightMs / 60000);
+  ctx.fillStyle = fgDim;
+  ctx.textAlign = 'center';
+  ctx.fillText(`${Math.floor(nlMin/60)}h ${nlMin%60}m`, W / 2, labelY);
+
+  ctx.fillStyle = labelColor;
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtTime12(nextSr) + ' 🌅', W - padX - 4, labelY);
+}
+
+// Draw the sun arc canvas forced into "day" mode (for upcoming day preview)
+function drawSunArcForceDay(srDt, ssDt, cloudPct, weatherEmoji, hourlyData) {
+  // Call drawSunArc with a fake "now" baked in by manipulating global time context
+  // Easiest: just call drawSunArc with t set so sun is at ~30% through the arc
+  // We achieve this by drawing it directly with a t parameter.
+  // Since drawSunArc uses `new Date()` internally for position,
+  // we temporarily monkey-patch to place sun at a nice preview position.
+  const canvas = document.getElementById('sun-arc-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr  = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(rect.width  * dpr) || 440;
+  canvas.height = Math.round(rect.height * dpr) || 140;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const W = rect.width  || 440;
+  const H = rect.height || 140;
+  const isKitschy = document.body.classList.contains('skin-kitschy');
+  const cs = getComputedStyle(document.body);
+  const monoFont = isKitschy ? 'Fredoka, sans-serif' : 'Share Tech Mono, monospace';
+  const padX = 10, labelH = 20;
+  const horizY = H - labelH;
+  const arcRx = (W - padX * 2) / 2;
+  const arcRy = horizY - 6;
+  const arcCx = W / 2;
+  const fg3   = cs.getPropertyValue('--fg3').trim() || '#aaa';
+  const fgDim = cs.getPropertyValue('--fg-dim').trim() || '#888';
+  const borderC = cs.getPropertyValue('--border').trim() || '#ccc';
+  const c = cloudPct / 100;
+
+  // Sky gradient (full clear — preview of coming day)
+  const skyTop    = isKitschy ? lerpColor([135,196,255],[170,170,185],c) : lerpColor([10,60,120],[40,50,55],c);
+  const skyBottom = isKitschy ? lerpColor([255,235,185],[215,215,215],c) : lerpColor([20,40,20],[30,35,30],c);
+  const skyOpacity = isKitschy ? 0.6 : 0.75;
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, horizY);
+  skyGrad.addColorStop(0, `rgba(${skyTop},${skyOpacity})`);
+  skyGrad.addColorStop(1, `rgba(${skyBottom},${skyOpacity * 0.35})`);
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, horizY);
+
+  // Horizon
+  ctx.strokeStyle = isKitschy ? `rgba(180,120,60,${0.3+c*0.2})` : borderC;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.moveTo(padX, horizY);
+  ctx.lineTo(W - padX, horizY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Preview sun at t=0.5 (solar noon) — entirely dashed arc (future)
+  const arcAlpha = 0.35; // dimmer to indicate it's a preview
+  ctx.save();
+  ctx.strokeStyle = isKitschy ? `rgba(200,130,60,${arcAlpha})` : `rgba(0,200,60,${arcAlpha})`;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.ellipse(arcCx, horizY, arcRx, arcRy, 0, Math.PI, 0, false);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Preview sun emoji at solar noon (t=0.5 → angle = PI/2)
+  const previewAngle = Math.PI - 0.5 * Math.PI; // = PI/2
+  const sunX = arcCx + arcRx * Math.cos(previewAngle);
+  const sunY = horizY - arcRy * Math.sin(previewAngle);
+  const glowAlpha = 0.35 * (1 - c * 0.7);
+  if (glowAlpha > 0.03) {
+    const grad = ctx.createRadialGradient(sunX, sunY, 2, sunX, sunY, 26);
+    grad.addColorStop(0, `rgba(255,220,80,${glowAlpha})`);
+    grad.addColorStop(1, 'rgba(255,180,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 26, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 0.7; // slightly transparent to indicate preview
+  ctx.font = '28px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(weatherEmoji, sunX, sunY);
+  ctx.globalAlpha = 1;
+
+  // "Tomorrow" label tag
+  ctx.font = `8px ${monoFont}`;
+  ctx.fillStyle = isKitschy ? 'rgba(180,100,30,0.7)' : 'rgba(0,200,60,0.55)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('TOMORROW', W / 2, sunY - 18);
+
+  // Label strip
+  const labelY = horizY + 3;
+  const labelColor = isKitschy ? '#9b6030' : fg3;
+  ctx.fillStyle = labelColor;
+  ctx.font = `10px ${monoFont}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('\ud83c\udf05 ' + fmtTime12(srDt), padX + 4, labelY);
+
+  const dlMin = Math.round((ssDt - srDt) / 60000);
+  ctx.fillStyle = fgDim;
+  ctx.textAlign = 'center';
+  ctx.fillText(`${Math.floor(dlMin/60)}h ${dlMin%60}m`, W / 2, labelY);
+
+  ctx.fillStyle = labelColor;
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtTime12(ssDt) + ' \ud83c\udfd7\ufe0f', W - padX - 4, labelY);
+}
+
+
+
+/* ============================================================
+   RENDER HOURLY — rows=hours, cols=metrics
+   ============================================================ */
+function renderHourly(data) {
+  const h = data.hourly;
+  const now = new Date();
+  const nowH = new Date(now);
+  nowH.setMinutes(0,0,0);
+
+  const times = h.time.map(t => new Date(t));
+  const startIdx = Math.max(0, times.findIndex(t => t >= nowH) - 1);
+  const endIdx   = Math.min(times.length - 1, startIdx + hourlyHours + 1);
+
+  // Sparkline range spans both temp AND dew point so both are positioned
+  // on a shared axis. Temp is prominent; dew point is secondary (gray).
+  const allVals = [];
+  for (let i = startIdx; i <= endIdx; i++) {
+    allVals.push(toF(h.temperature_2m[i]));
+    allVals.push(toF(h.dew_point_2m[i]));
+  }
+  const tMin = Math.min(...allVals);
+  const tMax = Math.max(...allVals);
+  const tRange = tMax - tMin || 1;
+
+  const tbody = document.getElementById('hourly-body');
+  tbody.innerHTML = '';
+
+  let lastAmPm = null;
+  let lastWCode = null;
+  let lastIsDay = null;
+
+  const cs = getComputedStyle(document.body);
+
+  for (let i = startIdx; i <= endIdx; i++) {
+    const t = times[i];
+    const isCurrent = (t.getTime() === nowH.getTime());
+    const isDay = h.is_day[i] === 1;
+    const ampm = t.getHours() < 12 ? 'AM' : 'PM';
+    const showAmPm = (ampm !== lastAmPm);
+    lastAmPm = ampm;
+
+    const wCode = h.weather_code[i];
+    const wInfo = wmo(wCode);
+    const dayToggle = (lastIsDay !== null && isDay !== lastIsDay);
+
+    // Sky icon category: treat each code 0–9 individually (clear→overcast are meaningfully
+    // different), and group higher codes by tens (51–55 are all "drizzle", etc.)
+    const skyCategory = wCode < 10 ? wCode : Math.floor(wCode / 10);
+    const lastSkyCategory = lastWCode === null ? -1 : (lastWCode < 10 ? lastWCode : Math.floor(lastWCode / 10));
+    const skyChanged = skyCategory !== lastSkyCategory;
+
+    // Show icon on: (a) first row, (b) category change, (c) day↔night flip
+    const showSky = (i === startIdx) || skyChanged || dayToggle;
+    lastWCode = wCode;
+    lastIsDay = isDay;
+
+    const tempF = toF(h.temperature_2m[i]);
+    const dewF  = toF(h.dew_point_2m[i]);
+    const rh    = h.relative_humidity_2m[i];
+    const wind  = toMph(h.wind_speed_10m[i]);
+    const wd    = windDir(h.wind_direction_10m[i]);
+    const uv    = Math.round(h.uv_index[i] ?? 0);
+    const precip = h.precipitation[i];
+    const cloud = h.cloud_cover[i];
+
+    // Position both temp and dew point on the shared axis
+    const tempPct = ((tempF - tMin) / tRange) * 100;
+    const tempLeft = Math.max(8, Math.min(92, tempPct));
+    const dewPct  = ((dewF  - tMin) / tRange) * 100;
+    const dewLeft = Math.max(8, Math.min(92, dewPct));
+
+    // Wind: size by speed
+    const windSize = wind < 5 ? 0.52 : wind < 10 ? 0.68 : wind < 20 ? 0.92 : 1.15;
+    const windOpacity = wind < 3 ? 0.35 : 1;
+
+    // UV: size + highlight
+    const uvSize = uv <= 0 ? 0.5 : uv <= 2 ? 0.62 : uv <= 5 ? 0.82 : 1.0;
+    const uvHigh = uv > 5;
+
+    // Temp color (prominent)
+    let tempColor = cs.getPropertyValue('--fg2').trim();
+    if (tempF >= 85) tempColor = cs.getPropertyValue('--hot').trim();
+    else if (tempF <= 32) tempColor = cs.getPropertyValue('--cold').trim();
+
+    // Dew point: always gray/dim, smaller font
+    const dewColor = cs.getPropertyValue('--fg-dim').trim() || '#555';
+
+    // If temp and dew are very close (< ~4°F apart on the 80px cell),
+    // offset dew label slightly so they don't collide.
+    const pxApart = Math.abs(tempLeft - dewLeft) * 0.80; // 80px cell
+    const dewNudge = (pxApart < 14 && dewLeft <= tempLeft) ? -1 : 0; // push dew left if crowded
+
+    // Time cell
+    const hh = t.getHours() % 12 || 12;
+    const hourStr = `${hh}${showAmPm ? `<span class="ampm-tag">${ampm}</span>` : ''}`;
+
+    const tr = document.createElement('tr');
+    tr.className = `${isDay ? 'h-day' : 'h-night'}${isCurrent ? ' h-current' : ''}`;
+
+    tr.innerHTML = `
+      <td class="h-time">${hourStr}</td>
+      <td class="h-temp">
+        <div class="temp-plot-wrap">
+          <span class="temp-plot-label" style="left:${dewLeft + dewNudge}%;color:${dewColor};font-size:0.68rem;opacity:0.75">${dewF}°</span>
+          <span class="temp-plot-label" style="left:${tempLeft}%;color:${tempColor}">${tempF}°</span>
+        </div>
+      </td>
+      <td class="h-rh">${dewComfortEmoji(dewF)}<span style="font-size:0.52rem;color:var(--fg3)">${rh}%</span></td>
+      <td class="h-wind" style="font-size:${windSize}rem;opacity:${windOpacity}">
+        ${wd.arrow}${wind}
+      </td>
+      <td class="h-uv${uvHigh ? ' uv-high' : ''}" style="font-size:${uvSize}rem;color:${!uvHigh && uv>0 ? uvColor(uv) : (uv===0?'var(--fg-dim)':'')}">${uv > 0 ? uv : '·'}</td>
+      <td class="h-precip ${precip <= 0 ? 'no-precip' : ''}">${precip > 0 ? toIn(precip)+'"' : '·'}</td>
+      <td class="h-cloud-bar">
+        <div class="cloud-bar-wrap">
+          <div class="cloud-bar-bg ${isDay ? 'cb-day' : 'cb-night'}">
+            <div class="cloud-bar-fill" style="width:${cloud}%"></div>
+          </div>
+        </div>
+      </td>
+      <td class="h-clouds" style="text-align:right;padding-right:4px">
+        ${showSky ? `<span style="font-size:0.9rem">${wInfo.e}</span>` : ''}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+/* ============================================================
+   RENDER DAILY — connected temp range chart via SVG
+   ============================================================ */
+function renderDaily(data) {
+  const d = data.daily;
+  // Slice to selected dailyDays
+  const n = Math.min(dailyDays, d.time.length);
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const iconsRow = document.getElementById('daily-icons-row');
+  iconsRow.innerHTML = '';
+  const precipRow = document.getElementById('daily-precip-row');
+  precipRow.innerHTML = '';
+
+  const allTemps = [
+    ...d.temperature_2m_max.slice(0,n),
+    ...d.temperature_2m_min.slice(0,n)
+  ];
+  const tMin = Math.min(...allTemps);
+  const tMax = Math.max(...allTemps);
+
+  const nowTempC = (data.current?.temperature_2m) ?? 0;
+  const nowTempF = toF(nowTempC);
+
+  // SVG — doubled height
+  const svgEl = document.getElementById('daily-svg');
+  const W = svgEl.parentElement.clientWidth - 20 || 340;
+  const H = 200;
+  svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svgEl.setAttribute('width', W);
+  svgEl.setAttribute('height', H);
+
+  const colW = W / n;
+  const pad = 16;
+
+  const t2y = t => H - pad - ((toF(t) - toF(tMin)) / (toF(tMax) - toF(tMin))) * (H - 2*pad);
+  const nowY = t2y(nowTempC);
+
+  const cs = getComputedStyle(document.body);
+  const hotColor    = cs.getPropertyValue('--hot').trim();
+  const coldColor   = cs.getPropertyValue('--cold').trim();
+  const accentColor = cs.getPropertyValue('--accent').trim();
+
+  let maxPts = [], minPts = [];
+  for (let i = 0; i < n; i++) {
+    const cx = colW * i + colW / 2;
+    maxPts.push({x: cx, y: t2y(d.temperature_2m_max[i])});
+    minPts.push({x: cx, y: t2y(d.temperature_2m_min[i])});
+  }
+
+  let svg = '<defs>';
+  // clipPaths for two-tone fill
+  const mkClip = (id, y0, y1) =>
+    `<clipPath id="${id}"><rect x="0" y="${y0}" width="${W}" height="${y1-y0}"/></clipPath>`;
+  svg += mkClip('clip-hot',  0,    nowY);
+  svg += mkClip('clip-cold', nowY, H);
+  svg += '</defs>';
+
+  // Column highlights
+  for (let i = 0; i < n; i++) {
+    const isToday = d.time[i] === todayStr;
+    if (isToday) {
+      svg += `<rect x="${colW*i}" y="0" width="${colW}" height="${H}"
+        fill="${accentColor}" fill-opacity="0.07"/>`;
+    }
+  }
+
+  // Filled band
+  const polyPts = (tops, bots) =>
+    [...tops, ...[...bots].reverse()]
+    .map((p,i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+  const poly = polyPts(maxPts, minPts);
+  svg += `<path d="${poly}" fill="${hotColor}"  fill-opacity="0.28" clip-path="url(#clip-hot)"/>`;
+  svg += `<path d="${poly}" fill="${coldColor}" fill-opacity="0.28" clip-path="url(#clip-cold)"/>`;
+
+  // Max / min lines
+  svg += `<polyline points="${maxPts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}"
+    fill="none" stroke="${hotColor}" stroke-width="2" stroke-linejoin="round"/>`;
+  svg += `<polyline points="${minPts.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}"
+    fill="none" stroke="${coldColor}" stroke-width="2" stroke-linejoin="round"/>`;
+
+  // NOW reference line
+  svg += `<line x1="0" y1="${nowY.toFixed(1)}" x2="${W}" y2="${nowY.toFixed(1)}"
+    stroke="${accentColor}" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>`;
+
+  // Per-column: temp labels + hot/cold emoji annotation above max or below min
+  for (let i = 0; i < n; i++) {
+    const cx = colW * i + colW / 2;
+    const mx = maxPts[i];
+    const mn = minPts[i];
+    const maxF = toF(d.temperature_2m_max[i]);
+    const minF = toF(d.temperature_2m_min[i]);
+    const isToday = d.time[i] === todayStr;
+    const isWknd  = [0,6].includes(new Date(d.time[i]+'T12:00:00').getDay());
+    const fg2 = cs.getPropertyValue('--fg2').trim();
+
+    // Max label
+    svg += `<text x="${cx}" y="${Math.max(12, mx.y - 4)}" text-anchor="middle"
+      font-size="9" fill="${hotColor}" font-family="monospace">${maxF}°</text>`;
+    // Min label
+    svg += `<text x="${cx}" y="${Math.min(H-2, mn.y + 11)}" text-anchor="middle"
+      font-size="9" fill="${coldColor}" font-family="monospace">${minF}°</text>`;
+
+    // Hot/cold emoji: if column avg is notably above/below now
+    const avgF = (maxF + minF) / 2;
+    const diff = avgF - nowTempF;
+    if (Math.abs(diff) >= 5) {
+      const emoji = diff > 0 ? '🔥' : '🥶';
+      const ey = diff > 0
+        ? Math.max(22, mx.y - 16)   // above max line
+        : Math.min(H - 12, mn.y + 20); // below min line
+      svg += `<text x="${cx}" y="${ey}" text-anchor="middle" font-size="11">${emoji}</text>`;
+    }
+  }
+
+  // TODAY dot + label
+  const todayIdx = d.time.slice(0, n).indexOf(todayStr);
+  if (todayIdx >= 0) {
+    const cx = colW * todayIdx + colW / 2;
+    svg += `<circle cx="${cx}" cy="${nowY.toFixed(1)}" r="4" fill="${accentColor}" opacity="0.9"/>`;
+  }
+
+  svgEl.innerHTML = svg;
+
+  // Position NOW label on the reference line
+  const nowLabelEl = document.getElementById('daily-now-label');
+  if (nowLabelEl) {
+    // nowY is in SVG coords; convert to % of svg height for positioning
+    const svgH = H;
+    const pct = nowY / svgH * 100;
+    nowLabelEl.style.top = `${pct}%`;
+  }
+
+  // Icons + day labels + precip
+  for (let i = 0; i < n; i++) {
+    const isToday = d.time[i] === todayStr;
+    const isWknd  = [0,6].includes(new Date(d.time[i]+'T12:00:00').getDay());
+    const wInfo = wmo(d.weather_code[i]);
+
+    const ic = document.createElement('div');
+    ic.style.cssText = `flex:1;text-align:center;font-size:0.7rem;`;
+    ic.innerHTML = `
+      <div style="font-family:var(--font-display);font-size:0.75rem;color:${isToday?'var(--accent)':(isWknd?'var(--hot)':'var(--fg3)')};${isWknd?'font-weight:bold':''}">
+        ${fmtDay(d.time[i])}<br><span style="font-size:0.6rem;color:var(--fg-dim)">${fmtMD(d.time[i])}</span>
+      </div>
+      <div style="font-size:1.1rem">${wInfo.e}</div>
+    `;
+    iconsRow.appendChild(ic);
+
+    const pc = document.createElement('div');
+    pc.style.cssText = `flex:1;text-align:center;font-size:0.65rem;color:${d.precipitation_sum[i] > 0 ? 'var(--precip)' : 'var(--fg-dim)'};`;
+    pc.textContent = d.precipitation_sum[i] > 0 ? `${toIn(d.precipitation_sum[i])}"` : '·';
+    precipRow.appendChild(pc);
+  }
+}
+
+/* ============================================================
+   METADATA (last update, next update)
+   ============================================================ */
+function updateMeta(fetchTime) {
+  const now = new Date();
+
+  // Next aligned update at :01, :16, :31, :46
+  const m = now.getMinutes();
+  const alignedOffsets = [1, 16, 31, 46];
+  let nextMin = alignedOffsets.find(x => x > m) ?? (alignedOffsets[0] + 60);
+  const nextDt = new Date(now);
+  nextDt.setMinutes(nextMin, 0, 0);
+
+  // Format as H:MM / H:MM (fetched / next refresh)
+  const fetchStr = fmtTime12(fetchTime);
+  const nextStr  = fmtTime12(nextDt);
+
+  document.getElementById('meta-combined').textContent = `Last: ${fetchStr} | Next: ${nextStr}`;
+}
+
+/* ============================================================
+   MAIN INIT
+   ============================================================ */
+let lastFetch = null;
+
+async function load() {
+  try {
+    const data = await fetchWeather();
+    _lastData = data;
+    lastFetch = new Date();
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error-msg').style.display = 'none';
+
+    ['now-section','hourly-section','daily-section'].forEach(id => {
+      document.getElementById(id).style.display = '';
+    });
+
+    renderNow(data);
+    renderHourly(data);
+    renderDaily(data);
+    updateMeta(lastFetch);
+
+    const sign = CONFIG.lon < 0 ? 'W' : 'E';
+    document.getElementById('footer').textContent =
+      `fetched ${lastFetch.toLocaleTimeString()} · open-meteo.com · ${CONFIG.lat}°N ${Math.abs(CONFIG.lon)}°${sign}`;
+  } catch (err) {
+    document.getElementById('loading').style.display = 'none';
+    const em = document.getElementById('error-msg');
+    em.style.display = '';
+    em.textContent = `⚠ ${err.message}`;
+    console.error(err);
+  }
+}
+
+// Auto-refresh
+function scheduleRefresh() {
+  const now = new Date();
+  const m = now.getMinutes(), s = now.getSeconds();
+  const offsets = [1, 16, 31, 46];
+  let nextMin = offsets.find(x => x > m) ?? (offsets[0] + 60);
+  const waitMs = ((nextMin - m) * 60 - s) * 1000;
+  setTimeout(() => { load(); scheduleRefresh(); }, waitMs);
+}
+
+// Meta ticker
+setInterval(() => { if (lastFetch) updateMeta(lastFetch); }, 30000);
+
+/* ============================================================
+   DROPDOWN HANDLERS
+   ============================================================ */
+function updateLocationCoords() {
+  const lat = CONFIG.lat, lon = CONFIG.lon;
+  const latStr = Math.abs(lat).toFixed(4) + '°' + (lat >= 0 ? 'N' : 'S');
+  const lonStr = Math.abs(lon).toFixed(4) + '°' + (lon >= 0 ? 'E' : 'W');
+  const el = document.getElementById('location-coords');
+  if (el) el.textContent = latStr + '  ' + lonStr;
+}
+
+document.getElementById('location-select').addEventListener('change', function() {
+  const [lat, lon, tz] = this.value.split(',');
+  const loc = LOCATIONS.find(l => String(l.lat) === lat);
+  if (loc) CONFIG = { ...loc, refreshMinutes: 15 };
+  else { CONFIG.lat = parseFloat(lat); CONFIG.lon = parseFloat(lon); CONFIG.tz = tz; }
+  updateLocationCoords();
+  load();
+});
+
+document.getElementById('hourly-range-btns').addEventListener('click', function(e) {
+  const btn = e.target.closest('.range-btn');
+  if (!btn) return;
+  this.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  hourlyHours = parseInt(btn.dataset.val);
+  if (_lastData) renderHourly(_lastData);
+});
+
+document.getElementById('daily-range-btns').addEventListener('click', function(e) {
+  const btn = e.target.closest('.range-btn');
+  if (!btn) return;
+  this.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  dailyDays = parseInt(btn.dataset.val);
+  if (_lastData) renderDaily(_lastData);
+});
+
+document.getElementById('now-sky-btns').addEventListener('click', function(e) {
+  const btn = e.target.closest('.range-btn');
+  if (!btn) return;
+  this.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _nowSkyView = btn.dataset.view;
+  redrawNowSky();
+});
+
+updateLocationCoords();
+load();
+scheduleRefresh();
+
+/* ============================================================
+   SOUP SPEC TOGGLE
+   ============================================================ */
+function toggleSoup(btn) {
+  const body = btn.closest('.soup-spec-bar').nextElementSibling;
+  const isOpen = body.classList.toggle('open');
+  btn.classList.toggle('open', isOpen);
+  btn.textContent = isOpen ? '[ CLOSE ]' : '[ SOUP SPEC ]';
+}
+
+// WORLD_POLYS is loaded from world-polys.js (see <script src> in <head>)
+
+
+function drawGlobe(lat, lon) {
+  const canvas = document.getElementById('globe-canvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  // Size canvas to match its rendered height (set by flex stretch)
+  // ── SIZE KNOB: change 'rect.height' fallback (80) to set minimum globe size ──
+  const rect = canvas.getBoundingClientRect();
+  const size = Math.max(rect.height || 80, 70);
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.scale(dpr, dpr);
+
+  // ── SIZE KNOB: 'r' is the globe radius in CSS pixels. Decrease for smaller globe ──
+  const r = size / 2 - 1;
+  const cx = size / 2;
+  const cy = size / 2;
+
+  // Globe center = selected location (so pin is always in center of view)
+  const GLOBE_LAT = lat * Math.PI / 180;
+  const GLOBE_LON = lon * Math.PI / 180;
+
+  function project(latDeg, lonDeg) {
+    const phi = latDeg * Math.PI / 180;
+    const lam = lonDeg * Math.PI / 180;
+    const dLam = lam - GLOBE_LON;
+    const cosc = Math.sin(GLOBE_LAT) * Math.sin(phi) +
+                 Math.cos(GLOBE_LAT) * Math.cos(phi) * Math.cos(dLam);
+    if (cosc < 0) return null; // behind the globe
+    const x = cx + r * Math.cos(phi) * Math.sin(dLam);
+    const y = cy - r * (Math.cos(GLOBE_LAT) * Math.sin(phi) -
+                        Math.sin(GLOBE_LAT) * Math.cos(phi) * Math.cos(dLam));
+    return [x, y];
+  }
+
+  function drawPoly(coords, fill, stroke) {
+    if (coords.length < 2) return;
+    // Project each vertex; track which are visible
+    const projected = coords.map(([lo, la]) => {
+      const phi = la * Math.PI / 180;
+      const lam = lo * Math.PI / 180;
+      const dLam = lam - GLOBE_LON;
+      const cosc = Math.sin(GLOBE_LAT) * Math.sin(phi) +
+                   Math.cos(GLOBE_LAT) * Math.cos(phi) * Math.cos(dLam);
+      if (cosc < 0) return null;
+      const x = cx + r * Math.cos(phi) * Math.sin(dLam);
+      const y = cy - r * (Math.cos(GLOBE_LAT) * Math.sin(phi) -
+                          Math.sin(GLOBE_LAT) * Math.cos(phi) * Math.cos(dLam));
+      return [x, y];
+    });
+
+    // Only draw contiguous visible segments (no lines across the globe face)
+    const diam = r * 2;
+    ctx.beginPath();
+    let penDown = false;
+    for (let i = 0; i < projected.length; i++) {
+      const p = projected[i];
+      if (!p) { penDown = false; continue; }
+      if (!penDown) {
+        ctx.moveTo(p[0], p[1]);
+        penDown = true;
+      } else {
+        // If the segment would jump more than ~half the globe diameter, lift pen
+        const prev = projected[i - 1] || projected.slice(0, i).reverse().find(Boolean);
+        if (prev) {
+          const dx = p[0] - prev[0], dy = p[1] - prev[1];
+          if (dx*dx + dy*dy > diam * diam * 0.25) {
+            ctx.moveTo(p[0], p[1]);
+          } else {
+            ctx.lineTo(p[0], p[1]);
+          }
+        } else {
+          ctx.lineTo(p[0], p[1]);
+        }
+      }
+    }
+    ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 0.4; ctx.stroke(); }
+  }
+
+  // Ocean
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#1a3a5c';
+  ctx.fill();
+  ctx.strokeStyle = '#0d2236';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const LAND = '#2d5a27';
+  const LAND_STROKE = '#1e3d1b';
+
+  // Clip all drawing to the globe circle
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 0.5, 0, Math.PI * 2);
+  ctx.clip();
+
+  // Draw all world landmasses (data loaded async by world-polys.js)
+  for (const poly of (window.WORLD_POLYS || [])) {
+    drawPoly(poly, LAND, LAND_STROKE);
+  }
+
+  // Lat/lon grid lines subtly
+  ctx.setLineDash([1, 3]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 0.5;
+  for (let la = -60; la <= 80; la += 20) {
+    const pts = [];
+    for (let lo = -180; lo <= 180; lo += 5) {
+      const p = project(la, lo);
+      if (p) pts.push(p);
+    }
+    if (pts.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+    }
+  }
+  for (let lo = -180; lo <= 180; lo += 30) {
+    const pts = [];
+    for (let la = -80; la <= 80; la += 5) {
+      const p = project(la, lo);
+      if (p) pts.push(p);
+    }
+    if (pts.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
+  ctx.restore(); // end clip
+
+  // Location dot — always at center since globe is centered on it
+  const t = Date.now() * 0.003;
+  const pulse = (Math.sin(t) + 1) / 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3 + pulse * 3, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,0,0,${0.8 - pulse * 0.7})`;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'red';
+  ctx.fill();
+}
+
+</script>
+</body>
+</html>
