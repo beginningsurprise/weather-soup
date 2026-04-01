@@ -11,6 +11,9 @@
 <!-- Natural Earth 110m land polygons (public domain). Fetched async; globe
      waits for the 'worldpolysready' event before starting its animation. -->
 <script src="world-polys.js"></script>
+<!-- Köppen-Geiger 0.1° lookup (Beck et al. 2018). Loaded async; HERE panel
+     shows a dash until 'koppenready' fires, then updates. -->
+<script src="koppen-data.js"></script>
 <style>
 /* ============================================================
    CSS VARIABLES — two skins
@@ -679,6 +682,100 @@ body.skin-kitschy .panel-header select {
   align-self: stretch;
 }
 
+/* ── SEARCH BOX ── */
+#location-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+#location-search {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--fg2);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  outline: none;
+  box-sizing: border-box;
+  letter-spacing: 0.04em;
+}
+body.skin-kitschy #location-search {
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+}
+#location-search::placeholder { color: var(--fg-dim); }
+#location-search:focus { border-color: var(--accent); box-shadow: var(--glow); }
+
+#location-suggest {
+  display: none;
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--panel);
+  border: 1px solid var(--border-hl);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+#location-suggest.open { display: block; }
+.suggest-item {
+  padding: 5px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--fg2);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.skin-kitschy .suggest-item { font-family: var(--font-body); font-size: 0.82rem; }
+.suggest-item:last-child { border-bottom: none; }
+.suggest-item:hover, .suggest-item.active {
+  background: var(--bg3);
+  color: var(--accent);
+}
+
+/* ── INFO LINES (coords / elev-pop / Köppen / Windy) — all identical style ── */
+#location-coords,
+#location-elev-pop,
+#location-koppen,
+#location-windy {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  letter-spacing: 0.06em;
+  padding-left: 2px;
+  line-height: 1.5;
+}
+body.skin-kitschy #location-coords,
+body.skin-kitschy #location-elev-pop,
+body.skin-kitschy #location-koppen,
+body.skin-kitschy #location-windy {
+  font-family: var(--font-body);
+  font-size: 0.65rem;
+}
+#location-windy {
+  text-decoration: none;
+  display: inline-block;
+  transition: color 0.18s;
+}
+#location-windy:hover { color: var(--accent); }
+
+/* ── SELECT+SEARCH ROW (lives in header now — see HTML) ── */
+#location-controls-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
 /* ============================================================
    LOCATION SELECTOR
    ============================================================ */
@@ -692,9 +789,12 @@ body.skin-kitschy .panel-header select {
   overflow: hidden;
 }
 #location-header-row {
-  padding: 4px 10px;
+  padding: 3px 8px 3px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 #location-bar-row {
   display: flex;
@@ -721,16 +821,10 @@ body.skin-kitschy #location-label { font-size: 1.4rem; letter-spacing: 0.05em; }
   border-radius: var(--radius);
   cursor: pointer;
   outline: none;
-  width: 100%;
+  flex: 0 0 auto;
+  max-width: 55%;
 }
 body.skin-kitschy #location-select { font-family: var(--font-body); font-size: 1rem; }
-#location-coords {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  color: var(--fg-dim);
-  letter-spacing: 0.06em;
-  padding-left: 2px;
-}
 
 /* NOW label on daily chart */
 #daily-svg-wrap {
@@ -1012,21 +1106,32 @@ body.skin-kitschy .cloud-bar-bg.cb-night .cloud-bar-fill { background: #5a5070; 
   <div id="location-bar">
     <div id="location-header-row">
       <span id="location-label">HERE</span>
+      <div id="location-search-wrap">
+        <input id="location-search" type="text" placeholder="search city…" autocomplete="off" spellcheck="false">
+        <div id="location-suggest"></div>
+      </div>
     </div>
     <div id="location-bar-row">
       <div id="location-left">
-        <select id="location-select">
-          <option value="41.9,-87.9,America/Chicago">Chicago, IL</option>
-          <option value="25.7617,-80.1918,America/New_York">Miami, FL</option>
-          <option value="37.7749,-122.4194,America/Los_Angeles">San Francisco, CA</option>
-          <option value="40.7128,-74.006,America/New_York">New York, NY</option>
-          <option value="51.5074,-0.1278,Europe/London">London, UK</option>
-          <option value="48.8566,2.3522,Europe/Paris">Paris, France</option>
-          <option value="35.6762,139.6503,Asia/Tokyo">Tokyo, Japan</option>
-          <option value="-33.8688,151.2093,Australia/Sydney">Sydney, Australia</option>
-          <option value="-1.2921,36.8219,Africa/Nairobi">Nairobi, Kenya</option>
-        </select>
+        <!-- Dropdown -->
+        <div id="location-controls-row">
+          <select id="location-select">
+            <option value="41.9,-87.9,America/Chicago">Chicago, IL</option>
+            <option value="25.7617,-80.1918,America/New_York">Miami, FL</option>
+            <option value="37.7749,-122.4194,America/Los_Angeles">San Francisco, CA</option>
+            <option value="40.7128,-74.006,America/New_York">New York, NY</option>
+            <option value="51.5074,-0.1278,Europe/London">London, UK</option>
+            <option value="48.8566,2.3522,Europe/Paris">Paris, France</option>
+            <option value="35.6762,139.6503,Asia/Tokyo">Tokyo, Japan</option>
+            <option value="-33.8688,151.2093,Australia/Sydney">Sydney, Australia</option>
+            <option value="-1.2921,36.8219,Africa/Nairobi">Nairobi, Kenya</option>
+          </select>
+        </div>
+        <!-- Info lines: all same style -->
         <div id="location-coords">--°N  --°W</div>
+        <div id="location-elev-pop">—</div>
+        <div id="location-koppen">—</div>
+        <a id="location-windy" href="https://www.windy.com/?41.9,-87.9,9" target="_blank" rel="noopener">[↗ windy]</a>
       </div>
       <canvas id="globe-canvas"></canvas>
     </div>
@@ -2880,8 +2985,20 @@ function scheduleRefresh() {
 setInterval(() => { if (lastFetch) updateMeta(lastFetch); }, 30000);
 
 /* ============================================================
-   DROPDOWN HANDLERS
+   LOCATION HELPERS — coords, elevation/pop, Köppen, Windy
    ============================================================ */
+
+// Elevation (stored from geocoding API result) and population
+let _locationElev = null;   // metres
+let _locationPop  = null;   // raw number
+
+function fmtPop(n) {
+  if (!n || n <= 0) return null;
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
+}
+
 function updateLocationCoords() {
   const lat = CONFIG.lat, lon = CONFIG.lon;
   const latStr = Math.abs(lat).toFixed(4) + '°' + (lat >= 0 ? 'N' : 'S');
@@ -2890,13 +3007,240 @@ function updateLocationCoords() {
   if (el) el.textContent = latStr + '  ' + lonStr;
 }
 
-document.getElementById('location-select').addEventListener('change', function() {
-  const [lat, lon, tz] = this.value.split(',');
-  const loc = LOCATIONS.find(l => String(l.lat) === lat);
-  if (loc) CONFIG = { ...loc, refreshMinutes: 15 };
-  else { CONFIG.lat = parseFloat(lat); CONFIG.lon = parseFloat(lon); CONFIG.tz = tz; }
+function updateLocationElevPop() {
+  const el = document.getElementById('location-elev-pop');
+  if (!el) return;
+  const parts = [];
+  if (_locationElev != null) {
+    const ft = Math.round(_locationElev * 3.28084);
+    parts.push(ft.toLocaleString() + ' ft');
+  }
+  if (_locationPop != null) {
+    const p = fmtPop(_locationPop);
+    if (p) parts.push('pop. ' + p);
+  }
+  el.textContent = parts.length ? parts.join(' · ') : '—';
+}
+
+function updateKoppen() {
+  const el = document.getElementById('location-koppen');
+  if (!el) return;
+  if (!window.KOPPEN_READY) { el.textContent = '—'; return; }
+  const result = window.koppenLookup(CONFIG.lat, CONFIG.lon);
+  if (result) {
+    el.textContent = result.symbol + ' · ' + result.label;
+  } else {
+    el.textContent = '—';
+  }
+}
+
+function updateWindyLink() {
+  const el = document.getElementById('location-windy');
+  if (!el) return;
+  el.href = `https://www.windy.com/?${CONFIG.lat},${CONFIG.lon},9`;
+}
+
+function updateHerePanel() {
   updateLocationCoords();
+  updateLocationElevPop();
+  updateKoppen();
+  updateWindyLink();
+}
+
+// When Köppen data finishes loading asynchronously, refresh the Köppen line
+window.addEventListener('koppenready', () => updateKoppen(), { once: true });
+
+/* ============================================================
+   GEOCODING SEARCH
+   ============================================================ */
+(function () {
+  const searchEl   = document.getElementById('location-search');
+  const suggestEl  = document.getElementById('location-suggest');
+  const selectEl   = document.getElementById('location-select');
+
+  let _debounceTimer = null;
+  let _currentResults = [];
+  let _activeIdx = -1;
+
+  function closeSuggest() {
+    suggestEl.classList.remove('open');
+    suggestEl.innerHTML = '';
+    _currentResults = [];
+    _activeIdx = -1;
+  }
+
+  function applyResult(r) {
+    // r = result object from Open-Meteo geocoding API
+    CONFIG.lat = r.latitude;
+    CONFIG.lon = r.longitude;
+    CONFIG.tz  = r.timezone || 'UTC';
+    CONFIG.label = r.name;
+
+    _locationElev = (r.elevation != null) ? r.elevation : null;
+    _locationPop  = (r.population != null) ? r.population : null;
+
+    // Push this city onto the dropdown as a new top option (if not already there)
+    const val = `${r.latitude},${r.longitude},${r.timezone || 'UTC'}`;
+    const admin   = r.admin1 ? `, ${r.admin1}` : '';
+    const country = r.country_code ? ` · ${r.country_code.toUpperCase()}` : '';
+    const label   = r.name + admin + country;
+    // Check if an option with this value already exists
+    let existing = selectEl.querySelector(`option[value="${CSS.escape ? val : val}"]`);
+    if (!existing) {
+      // Find the first non-hardcoded separator or just prepend after a divider
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = label;
+      // Insert after the last hardcoded city (before any previously searched ones)
+      // We mark searched options with data-searched so we can insert above them
+      const firstSearched = selectEl.querySelector('option[data-searched]');
+      opt.setAttribute('data-searched', '1');
+      if (firstSearched) {
+        selectEl.insertBefore(opt, firstSearched);
+      } else {
+        selectEl.appendChild(opt);
+      }
+      existing = opt;
+    }
+    selectEl.value = val;
+
+    searchEl.value = '';
+    closeSuggest();
+
+    updateHerePanel();
+    load();
+  }
+
+  function renderSuggestions(results) {
+    suggestEl.innerHTML = '';
+    _currentResults = results;
+    _activeIdx = -1;
+
+    if (!results.length) { closeSuggest(); return; }
+
+    results.forEach((r, i) => {
+      const div = document.createElement('div');
+      div.className = 'suggest-item';
+      const country = r.country_code ? ` · ${r.country_code.toUpperCase()}` : '';
+      const admin   = r.admin1 ? `, ${r.admin1}` : '';
+      div.textContent = r.name + admin + country;
+      div.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // don't blur the input
+        applyResult(r);
+      });
+      suggestEl.appendChild(div);
+    });
+
+    suggestEl.classList.add('open');
+  }
+
+  function setActive(idx) {
+    const items = suggestEl.querySelectorAll('.suggest-item');
+    items.forEach(el => el.classList.remove('active'));
+    _activeIdx = idx;
+    if (idx >= 0 && idx < items.length) {
+      items[idx].classList.add('active');
+    }
+  }
+
+  async function doSearch(query) {
+    if (!query || query.length < 2) { closeSuggest(); return; }
+    try {
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      renderSuggestions(data.results || []);
+    } catch (_) {
+      closeSuggest();
+    }
+  }
+
+  searchEl.addEventListener('input', () => {
+    clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(() => doSearch(searchEl.value.trim()), 350);
+  });
+
+  searchEl.addEventListener('keydown', (e) => {
+    if (!suggestEl.classList.contains('open')) return;
+    const count = _currentResults.length;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive((_activeIdx + 1) % count);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive((_activeIdx - 1 + count) % count);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (_activeIdx >= 0 && _activeIdx < count) {
+        applyResult(_currentResults[_activeIdx]);
+      } else if (count > 0) {
+        applyResult(_currentResults[0]);
+      }
+    } else if (e.key === 'Escape') {
+      closeSuggest();
+    }
+  });
+
+  searchEl.addEventListener('blur', () => {
+    // Small delay so mousedown on a suggestion fires first
+    setTimeout(closeSuggest, 150);
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (!searchEl.contains(e.target) && !suggestEl.contains(e.target)) {
+      closeSuggest();
+    }
+  });
+})();
+
+/* ============================================================
+   DROPDOWN HANDLERS
+   ============================================================ */
+document.getElementById('location-select').addEventListener('change', async function() {
+  const parts = this.value.split(',');
+  // value format: "lat,lon,tz" — tz may contain commas (e.g. America/New_York has none,
+  // but to be safe rejoin from index 2 onward)
+  const lat = parseFloat(parts[0]);
+  const lon = parseFloat(parts[1]);
+  const tz  = parts.slice(2).join(',');
+  const loc = LOCATIONS.find(l => String(l.lat) === parts[0]);
+  if (loc) CONFIG = { ...loc, refreshMinutes: 15 };
+  else { CONFIG.lat = lat; CONFIG.lon = lon; CONFIG.tz = tz; }
+
+  // Always try to fetch elev/pop from geocoding for any selected location
+  _locationElev = null;
+  _locationPop  = null;
+  updateHerePanel();   // render immediately with dashes while fetching
   load();
+
+  // Background fetch of elev/pop using the city name or reverse-geocode via lat/lon search
+  try {
+    const name = loc ? loc.label.replace(/,.*/, '').trim() : '';
+    if (name) {
+      const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=5&language=en&format=json`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        // Find the best match: same or very close lat/lon
+        const results = data.results || [];
+        let best = null;
+        let bestDist = Infinity;
+        for (const r of results) {
+          const dlat = r.latitude  - CONFIG.lat;
+          const dlon = r.longitude - CONFIG.lon;
+          const dist = dlat*dlat + dlon*dlon;
+          if (dist < bestDist) { bestDist = dist; best = r; }
+        }
+        if (best) {
+          _locationElev = (best.elevation != null) ? best.elevation : null;
+          _locationPop  = (best.population != null) ? best.population : null;
+          updateLocationElevPop();
+        }
+      }
+    }
+  } catch (_) { /* silent — elev/pop just stays as dash */ }
 });
 
 document.getElementById('hourly-range-btns').addEventListener('click', function(e) {
@@ -2926,7 +3270,7 @@ document.getElementById('now-sky-btns').addEventListener('click', function(e) {
   redrawNowSky();
 });
 
-updateLocationCoords();
+updateHerePanel();
 load();
 scheduleRefresh();
 
